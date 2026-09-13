@@ -1,0 +1,20 @@
+# Local PeopleSoft configuration and credentials
+.peoplesoft/
+config.json
+**/config.json
+*.token
+*.token.json
+
+# Runtime and build output
+*.log
+reports/
+artifacts/
+backups/
+__pycache__/
+*.py[cod]
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,6 @@
+# Preserve Application Designer file-project exports byte-for-byte.
+C_META_DATA_PKG/*.XML -text
+C_META_DATA_PKG/*.ini -text
+
+# Screenshots are binary documentation assets.
+assets/**/*.png binary
