@@ -1,6 +1,6 @@
 # ps-cli
 
-`ps-cli` 是一个面向 Oracle PeopleSoft PeopleTools 元数据开发与访问的 Codex Skill。它通过 Integration Broker REST API 和随附的 Application Designer 文件工程，支持查询及维护 Record、Field、Page、Component、Project、Application Package、SQL 和 Application Engine 等定义。
+`ps-cli` 是一个面向 Oracle PeopleSoft PeopleTools 元数据开发与访问的 Skill。它通过 Integration Broker REST API 和随附的 Application Designer 文件工程，支持查询及维护 Record、Field、Page、Component、Project、Application Package、SQL 和 Application Engine 等定义。
 
 当前版本：`v.1.0.0`（首次公开发布；Skill 元数据版本为 `1.0.0`）。
 
