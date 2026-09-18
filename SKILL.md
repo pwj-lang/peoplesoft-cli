@@ -3,7 +3,7 @@ name: ps-cli
 description: "本 Skill 致力于让Agent可以通过Cli的方式对Peoplesoft系统进行开发和访问"
 license: "MIT for original project materials; see LICENSE and NOTICE.md"
 metadata:
-  version: 1.0.0
+  version: 1.0.1
   tags: [ps, peoplesoft, peoplecode, app-designer]
 ---
 
