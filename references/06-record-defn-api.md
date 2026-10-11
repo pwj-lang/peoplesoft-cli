@@ -1,11 +1,11 @@
-# AI_OPER_RECORD_DEFN API
+# Record、Field 与 Build
 
 通过 Integration Broker REST 接口查看、创建、修改 Record 定义，Build/Alter 实体表，创建视图。
 
 ## 接口地址
 
 ```
-POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_RECORD_DEFN.v1/
+POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_RECORD_DEFN.v1/
 ```
 
 > **URL 注意**：接口地址是 `AI_OPER_RECORD_DEFN.v1/`（不带 `_POST`）。
@@ -15,7 +15,7 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_RECORD_DEFN.v1/
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `recordName` | string | **是** | Record 名称，必须精确匹配 |
-| `operationType` | string | 否 | 操作类型，默认 `"struct"`。支持 `"struct"`、`"createRecord"`、`"modifyRecord"`、`"buildRecord"`、`"viewSQL"`、`"modifySQL"`、`"viewPeopleCode"`、`"modifyPeopleCode"` |
+| `operationType` | string | 否 | 操作类型，默认 `"struct"`。支持 `"struct"`、`"createRecord"`、`"modifyRecord"`、`"buildRecord"`、`"viewSQL"`、`"modifySQL"`、`"viewPeopleCode"`、`"modifyPeopleCode"`、`"deletePeopleCode"` |
 
 ### operationType 取值一览
 
@@ -26,7 +26,8 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_RECORD_DEFN.v1/
 | `"modifyRecord"` | 修改 Record（更新字段属性 / 新增字段） | `fields` |
 | `"buildRecord"` | Build/alter/create view — 三个子选项 | `createTable`、`alterTable`、`createView`（三个数组） |
 | `"viewPeopleCode"` | 查看 Record Field PeopleCode | `fieldName`、`event` |
-| `"modifyPeopleCode"` | 修改/创建 Record Field PeopleCode | `fieldName`、`event`、`peoplecode` |
+| `"modifyPeopleCode"` | 修改/创建 Record Field PeopleCode；拒绝空白正文 | `fieldName`、`event`、`peoplecode` |
+| `"deletePeopleCode"` | 真正删除一个 Record Field 事件程序 | `fieldName`、`event`、`expectedCode`；可选 `dryRun` |
 | `"viewSQL"` | 查看 View 的 SQL 正文（PSSQLTEXTDEFN, SQLTYPE=2） | 无 |
 | `"modifySQL"` | 编辑/新建 View 的 SQL 正文（upsert） | `sqlText`、`market`、`dbType`、`effdt`、`descr`、`comment` |
 
@@ -166,34 +167,6 @@ SQL 不存在时 `exists = "false"`，`statements = []`。
 
 `peoplecode` 字段使用 JSON 转义（`EscapeJSON`/`UnEscapeJSON`），与 App Package 编码一致。编译错误会返回错误信息和位置。如果代码不存在则自动创建（`CreateDefn` + `SaveNewDefn`），已存在则更新（`GetDefnToUpdate` + `UpdateDefn`）。
 
-**PeopleCode Key 结构**：
-
-PeopleCode 的 `%metadata:PeopleCodeProgram:PeopleCodeProgram_Manager` 使用分层 Key 结构来定位不同类型的 PeopleCode 程序。不同定义类型使用不同的 Key 层级和 KeyClass 常量：
-
-| 定义类型 | Key 层级（从外到内） | KeyClass 常量 |
-|----------|---------------------|---------------|
-| **Record Field** | Class_Record → Class_Field → Class_Method | Record + Field + Event |
-| **App Package** | Class_Application_Package → Class_Application_Class → Class_Method | 包 + 类 + 方法 |
-| **AE** | Class_Application_Engine → Class_Section → Class_Step → Class_Action → Class_Method (?) | AE + Section + Step + Action |
-| **Page** | Class_Panel → Class_Field → Class_Method | Page + Field + Event |
-| **Component** | 硬编码 10 + Market → Class_Record → Class_Field → Class_Method | 10 + Market + Record + Field + Event |
-
-> 注意：Component 使用硬编码常量 `10`（`Class_PnlGrp` 编译时符号解析失败，只能直接用数值）。Market 是必填层，例如 GBL 对应 `39`。
-
-```peoplecode
-/* Record Field PeopleCode */
-Local %metadata:Key &Key = create %metadata:Key(Key:Class_Record, &RecName);
-&Key.AddItem(Key:Class_Field, &FieldName);
-&Key.AddItem(Key:Class_Method, &Event);
-
-/* Component PeopleCode — 必须包含 Market 层，否则 GetProgram 返回 DefnExists=false */
-Local %metadata:Key &Key = create %metadata:Key(10, &CompName);
-&Key.AddItem(39 /* GBL */, &Market);
-&Key.AddItem(Key:Class_Record, &RecName);
-&Key.AddItem(Key:Class_Field, &FieldName);
-&Key.AddItem(Key:Class_Method, &Event);
-```
-
 ## modifyRecord 操作
 
 修改已存在的 Record 定义。字段属性为**全量替换**（客户端必须传完整的 `fieldProperty` 数组），v1 不做字段删除。
@@ -216,13 +189,35 @@ Local %metadata:Key &Key = create %metadata:Key(10, &CompName);
 | 场景 | 行为 |
 |------|------|
 | 字段已在 Record 中 | 更新 `USEEDIT`/`USEEDIT2`/`EDITTABLE`/`DEFGUICONTROL`/`LABEL_ID`/`DEFRECNAME`/`DEFFIELDNAME`（请求未提供的列保持 DB 现值） |
-| 字段不在 Record 中 | 追加到末尾（`editTable`/`labelId`/`defaultPageControl`/`defaultRecName`/`defaultFieldName` 可随请求指定） |
+| 字段不在 Record 中 | 默认追加到末尾；普通新字段可用 `insertBefore` 指定插到已有字段之前，后续字段编号顺延（`editTable`/`labelId`/`defaultPageControl`/`defaultRecName`/`defaultFieldName` 可随请求指定） |
 | 未在 `fields` 中出现的字段 | 保持不变 |
 | `descr`/`comment` 等 Record 级属性 | 可选，传入则更新 |
 
-### GUI 一致性校验（2026-09-05 新增，createRecord/modifyRecord 均生效）
+### 按位置插入新字段
 
-`fieldProperty` 请求经过 `RecordUseEdit.ValidateFieldProperty` 校验，规则与 Application Designer 的 Record Field Properties 对话框**完全一致**：GUI 中置灰（不可勾选）的组合会被拒绝，返回 400 并逐字段列出原因；任一字段校验失败则整个请求不写库（先全量校验、后统一写库）。
+每个普通新字段可传 `insertBefore`，值为当前 Record 已存在的字段名。例如在 COUNTRY 与 C12_2483_AMOUNT 之间插入 NAME 并设为 Key：
+
+```json
+{
+  "fields": [
+    {"fieldName": "NAME", "fieldProperty": ["Key"], "insertBefore": "C12_2483_AMOUNT"}
+  ]
+}
+```
+
+保存为 UTF-8 JSON 文件后执行 `record modify C_AI_KF1010 <file>`。服务端在 RDM 锁内顺延 FIELDNUM、插入新字段、重建展开字段并同步主索引；除编号顺延外，已有字段属性保持原值。未指定 insertBefore 时仍追加到末尾。同一请求的多个新字段插在相同目标前时按请求顺序排列。
+
+insertBefore 目标必须已存在于 Record 中，不能为空；不支持借此移动已有字段或插入子记录引用。请求中重复 fieldName、错误目标或其他字段校验失败会整体回滚，不会先插入部分字段。此操作仅修改定义；实体表结构仍需另行 Build/Alter。
+
+### 缓存、主索引与版本同步
+
+modifyRecord 在 RDM 锁内重建当前 Record 的 PSRECFIELDDB，更新定义版本和 RDM/SYS 缓存版本，并在同一事务中同步实体 Record（类型 0/7）的主索引 `_`。Key/DuplicateOrderKey 的加入、移除、降序和唯一性都会同步；自定义主键顺序保留仍存在的键并追加新键，其他索引保持原样。非实体 Record 不创建主索引。元数据失败会回滚。
+
+物理表和索引仍需另行 Build/Alter。Build/Alter 会按 ASCDESC 生成降序索引；Alter 使用展开字段复制公共列，复制失败或行数不一致会中止并保留原表。Oracle DDL 不能作为整体事务回滚；失败后可能留有临时表，仍应检查原表和错误详情。
+
+### 字段组合校验（createRecord/modifyRecord 均生效）
+
+`fieldProperty` 请求经过 `RecordUseEdit.ValidateFieldProperty` 校验，规则按已核实的 Application Designer 属性组合实现：GUI 中置灰（不可勾选）的组合会被拒绝，返回 400 并逐字段列出原因；任一字段校验失败则整个请求不写库（先全量校验、后统一写库）。
 
 - **依赖链**：SearchKey 需要 Key；SearchEdit 需要 SearchKey；DescendingKey 需要 Key/AlternateSearchKey/SearchKey 之一；DefaultSearchField 需要 SearchKey/AlternateSearchKey
 - **互斥**：FromSearchField 与 ThroughSearchField；四种 Table Edit（Yes/NoTableEdit、PromptTableEdit、TranslateTableEdit、1/0TableEdit）互斥
@@ -235,13 +230,13 @@ Local %metadata:Key &Key = create %metadata:Key(10, &CompName);
 ### v1 限制
 
 - 不删除字段
-- 不调整字段顺序
+- 不支持任意重排已有字段；新增普通字段可按 insertBefore 插入
 - 不修改 Record 类型
 - 常量默认值（Constant Default）暂不支持写入
 
 ## buildRecord 操作
 
-根据 Record 定义在数据库中创建实体表，与 AD 的 Build 操作等效。
+根据 Record 定义创建或修改数据库对象；已验证的规则如下，不能推定覆盖全部 AD Build 选项。
 
 ### 生成规则
 
@@ -278,18 +273,14 @@ Local %metadata:Key &Key = create %metadata:Key(10, &CompName);
 ### 请求示例
 
 ```json
-{"recordName": "C_TEST_REC2", "operationType": "buildRecord"}
+{"recordName":"C_TEST_REC2","operationType":"buildRecord","createTable":["C_TEST_REC2"]}
 ```
 
 ---
 
-## 响应格式
-
-统一 `code/message/data`。
-
 ## USEEDIT / USEEDIT2 位标志参考
 
-> 来源：`RecFldProperty.txt` + PSRECFIELD 验证
+> 以下是 AD 显示标志及 PSRECFIELD 位值参考；提交属性名使用 struct 的 fieldProperty 原值，不能用显示标签或位表猜接口枚举。
 
 ### USEEDIT 位标志表
 
@@ -327,37 +318,88 @@ Local %metadata:Key &Key = create %metadata:Key(10, &CompName);
 | Disable Autocomplete | 65536 | 禁用自动完成 |
 | Persist in Menu | 负数 | 菜单中持久化（bit 31） |
 
-### Python 位运算反推
+## 创建与 Build 注意事项
 
-```python
-USEEDIT_FLAGS = {
-    1: "Key", 2: "Duplicate Order Key", 4: "System Maintained",
-    8: "Field Add", 16: "Alternate Search Key", 32: "List Box Item",
-    64: "Descending Key", 128: "Field Change", 256: "Required",
-    512: "TableEdit Translate Table Edit", 1024: "Field Delete",
-    2048: "Search Key", 8192: "TableEdit YES/NO",
-    16384: "TableEdit Prompt Table Edit", 32768: "Auto-Update",
-    262144: "From Search Field", 524288: "Through Search Field",
-    2097152: "Disable Advanced Search Options",
-    8388608: "(base value)", 16777216: "Default Search Field",
-    134217728: "Allow Search Events for Prompt Dialogs",
-    268435456: "Search Edit",
-}
+- 创建须同时提供一致的 recordName、recName，以及 tableSpace 数组（可为 []，元素为 spaceName/dbName）；省略 tableSpace 可能触发空对象错误。
+- labelId 未指定时传 null，避免用空字符串覆盖默认标签；fieldProperty 按接口枚举精确匹配，保留当前属性后再修改。
+- Record 名最多 15 字符。子记录是占位符，Build 须在原位置递归展开其字段，不直接建 SUBRECORD 列。
+- PSDBFIELD.LENGTH 是字节长度，不再次乘 4；Number 长度大于 18 或不大于 0 使用 NUMBER。有小数的 Signed Number 使用 DECIMAL(LENGTH-DECIMALPOS, DECIMALPOS)。
+- CLOB/BLOB 排在普通列之后；索引使用 RECNAME 命名，而非 SQLTABLENAME；表空间与索引空间分开。View SQL 从 PSSQLTEXTDEFN 的 GBL/默认平台/最新生效日期读取。
+- Oracle DDL 不能整体事务回滚；Alter 失败检查原表、临时表和错误，不能直接重跑覆盖。
 
-USEEDIT2_FLAGS = {
-    8388608: "Do Not trace Value", 524288: "In Memory",
-    65536: "Disable Autocomplete for this field",
-}
+## Field 批量查询
 
-def decode_useredit(value):
-    if value < 8388608: return ["ERROR"]
-    flags = value - 8388608
-    return [n for b, n in sorted(USEEDIT_FLAGS.items()) if b != 8388608 and flags & b]
+通过 Integration Broker REST 接口批量查询 PeopleSoft 字段定义（PSDBFIELD + PSDBFLDLABL）。
 
-def decode_useredit2(value):
-    results = []
-    if value < 0: results.append("Persist in Menu"); value &= 0x7FFFFFFF
-    for b, n in sorted(USEEDIT2_FLAGS.items()):
-        if value & b: results.append(n); value &= ~b
-    return results
+处理类： `C_META_DATA_PKG:MetaData:OperFieldDefn`
+
+### 接口地址
+
 ```
+POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_FIELD_DEFN.v1/
+```
+
+### 服务操作
+
+`AI_OPER_FIELD_DEFN_POST` — 需要在 PIA 中给用户授予 Execute 权限。
+
+### 请求体
+
+请求体是**纯 JSON 数组**（不是对象），元素为字段名：
+
+```json
+["EMPLID", "EFFDT", "LASTUPDDTTM"]
+```
+
+空字段名会被跳过（`All()` 判断）。
+
+### 响应格式
+
+公共响应见 [安装说明](01-auth-api.md#公共调用规则)。
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "fields": [
+      {
+        "fieldName": "EMPLID",
+        "fieldType": "character",
+        "fieldTypeCode": 0,
+        "length": 11,
+        "lastUpdate": "Last updated by: PPLSOFT, 2020/01/01 00:00:00",
+        "comment": "Employee ID",
+        "labels": [
+          { "labelId": "EMPLID", "longName": "员工 ID", "shortName": "员工", "defaultLabel": "N" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### fields 数组元素
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `fieldName` | string | 字段名 |
+| `fieldType` | string | 类型名（MappingUtil.GetFieldTypeName 解码，FIELDTYPE + IMAGE_FMT） |
+| `fieldTypeCode` | int | 原始 FIELDTYPE 编码（0=Char,1=LongChar,2=Number,3=SignedNumber,4=Date,5=Time,6=DateTime,8=Image/Attachment,9=ImageRef） |
+| `length` | int | 字段长度（PSDBFIELD.LENGTH，字节长度） |
+| `lastUpdate` | string | 最后更新人 + 时间 |
+| `comment` | string | 长描述（DESCRLONG，明文返回） |
+| `labels` | array | Label 列表（PSDBFLDLABL），每项含 labelId/longName/shortName/defaultLabel |
+
+### 注意事项
+
+- 与 AI_SEARCH_DEFN（`definitionType=2`）不同：本接口返回完整字段定义（含 label、comment、lastUpdate），Search 只返回 fieldName/fieldType/length 三字段
+- comment 明文返回（未 JSON 转义）
+
+## 删除 Record Field 程序
+
+```powershell
+python scripts/peoplesoft_api.py record delete-code MY_RECORD --fieldname COUNTRY --event FieldChange --project MY_PROJECT --dry-run
+```
+
+保留 Record 和 Field；同字段其他事件不受影响。viewPeopleCode 增加 programExists。省略 `--dry-run` 执行删除；支持 `--output`，见 [删除流程](development-standards.md#peoplecode-真正删除)。

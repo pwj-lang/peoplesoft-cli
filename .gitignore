@@ -5,13 +5,15 @@ config.json
 *.token
 *.token.json
 
-# Runtime and build output
+# Runtime, test and build output
+__pycache__/
+*.py[cod]
+/tmp/
+/tests/
 *.log
 reports/
 artifacts/
 backups/
-__pycache__/
-*.py[cod]
 
 # Editor and operating-system files
 .vscode/

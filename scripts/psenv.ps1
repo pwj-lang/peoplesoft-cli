@@ -13,11 +13,11 @@ param(
 $apiScript = Join-Path $PSScriptRoot "peoplesoft_api.py"
 
 if ($Action -eq "use" -and [string]::IsNullOrWhiteSpace($Environment)) {
-    throw "Usage: .\psenv.ps1 use <environment> [-Auth]"
+    throw "用法：.\psenv.ps1 use <环境名> [-Auth]"
 }
 
 if ($Action -ne "use" -and $Auth) {
-    throw "-Auth is only valid with use"
+    throw "-Auth 仅用于 use 操作"
 }
 
 $cliArgs = @("env", $Action)

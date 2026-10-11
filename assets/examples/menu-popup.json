@@ -1,0 +1,19 @@
+{
+  "properties": {
+    "Menutype": 1,
+    "MenuLabel": "示例菜单",
+    "Installed": true
+  },
+  "collections": {
+    "Mit": [
+      {
+        "BarName": "MAIN",
+        "BarLabel": "主菜单",
+        "ItemName": "FIRST",
+        "ItemLabel": "第一项",
+        "ItemType": 9,
+        "ItemNum": 1
+      }
+    ]
+  }
+}

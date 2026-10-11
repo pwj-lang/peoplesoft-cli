@@ -1,45 +1,24 @@
 # ps-cli
 
-`ps-cli` 是一个面向 Oracle PeopleSoft PeopleTools 元数据开发与访问的 Skill。它通过 Integration Broker REST API 和随附的 Application Designer 文件工程，支持查询及维护 Record、Field、Page、Component、Project、Application Package、SQL 和 Application Engine 等定义。
+面向 PeopleSoft 元数据开发的中文 skill，提供 CLI、接口参考及可导入的 AD 文件工程。支持范围和使用流程见 [SKILL.md](SKILL.md)。
 
-当前版本：`v.1.0.1`（第二次公开发布；Skill 元数据版本为 `1.0.1`）。
+## 目录
 
-## 主要内容
+- `scripts/`：环境管理、认证和 API 调用。
+- `references/`：按开发场景组织的中文文档。
+- `C_META_DATA_PKG/`：AD 原生导出的 XML/INI，保留编译内容和原始格式。
+- `assets/examples/`：可调整后使用的 JSON 模板。
 
-- `SKILL.md`：Skill 的入口说明和操作约束。
-- `scripts/`：环境配置、认证和 REST API 命令行工具。
-- `references/`：各类 PeopleTools 定义的接口说明。
-- `C_META_DATA_PKG/`：使用 PeopleSoft Application Designer 导出的文件工程；为保证能够被 AD 识别和导入，发布时保持导出内容原样。
-- `assets/authorization/`：REST 服务授权步骤的界面截图。
+部署及授权见 [安装说明](references/01-auth-api.md)，开发前读取 [开发规范](references/development-standards.md)。服务端在 PANWX25 / PeopleTools 8.60.10 验证；其他版本需另行核验。
 
-## 使用前提
+## 版本与维护
 
-- 合法获得并获准使用的 Oracle PeopleSoft/PeopleTools 环境。
-- 具备部署 Application Designer Project 和配置 Integration Broker 的权限。
-- 使用专用、最小权限账号，并优先在非生产环境验证。
+本包版本为 **1.5.0**，基于 rc.2 完成第二轮独立复验；后续目标为 **2.0.0**，见 [发布规划](references/release-roadmap.md)。旧 2.0.0～2.4.2 为未公开的内部实施编号，保留在 [变更记录](CHANGELOG.md)。本包原生工程有 110 条目、122 定义实例，包含 28 个运行必需类的源码与编译内容，本轮维护其中 17 类。
 
-详细安装和调用方式见 [SKILL.md](SKILL.md)。导入服务端 Project 时见 [AD 导入说明](references/ad-cli-project-import.md)，授权时见 [REST 授权说明](references/rest-authorization.md)。
+运行包只保留必要脚本、工程、文档和示例。临时导出、测试夹具、字节码及验收报告存放在 skill 外的开发工作区。文档以中文维护，命令、参数和原生对象名保留原文。
 
-## 项目来源
+## 许可与安全
 
-据维护者说明，本项目的 Skill 指令、命令行脚本、参考文档和自定义 PeopleCode 由维护者在 AI 辅助下独立编写、审阅和整合，没有从特定第三方项目复制代码。
+原创内容采用 [MIT 许可证](LICENSE)，许可证原文保留；Oracle 生成内容和第三方权利范围见 [来源与许可说明](NOTICE.md)。本项目与 Oracle 无隶属、赞助或认证关系。
 
-`C_META_DATA_PKG` XML/INI 是由 Oracle PeopleSoft Application Designer 根据项目定义生成的文件工程，其中可能包含 PeopleTools 自动生成的技术元数据、交付对象标记或互操作所需的定义。界面截图来自维护者获准使用的 PeopleSoft 环境，仅用于说明授权步骤。
-
-## 非官方声明
-
-本项目是独立的个人开发项目，并非 Oracle 官方产品，与 Oracle Corporation 及其关联公司不存在隶属、赞助、认证或背书关系。
-
-Oracle 和 PeopleSoft 是 Oracle Corporation 和/或其关联公司的商标。Oracle 软件、界面、交付对象及自动生成内容的权利仍归其各自权利人所有。使用者有责任确保其安装、导入、运行和再分发行为符合适用的 Oracle 许可协议及所在组织的政策。
-
-Oracle 相关规则可参阅：
-
-- [Oracle Legal Notices](https://docs.oracle.com/en-us/iaas/Content/legalnotices.htm)
-- [Oracle Trademark Guidelines](https://www.oracle.com/legal/trademarks/)
-- [Oracle Screenshot Usage](https://www.oracle.com/legal/copyright/)
-
-## 许可证和安全性
-
-维护者拥有权利的原创项目内容采用 MIT License；第三方、Oracle 相关内容和 AD 生成内容的适用范围见 [NOTICE.md](NOTICE.md)。
-
-当前版本包含高权限元数据写入能力，并存在已知的动态 SQL 安全限制，不应直接暴露到互联网或提供给不受信任的调用者。部署前请阅读 [SECURITY.md](SECURITY.md)。
+使用者需拥有 PeopleSoft/PeopleTools 的使用及部署权限。部署前阅读 [安全说明](SECURITY.md) 和 [已知问题](references/known-code-issues.md)。

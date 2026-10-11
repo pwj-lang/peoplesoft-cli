@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-peoplesoft_api.py — PeopleSoft IB REST API CLI 封装
+peoplesoft_api.py — PeopleSoft IB REST 命令行工具 封装
 
 封装 PeopleSoft 元数据相关接口，自动处理认证、token 缓存、JSON 转义/反转义。
 输出为已解码的纯文本，减少 AI token 消耗。
@@ -11,7 +11,7 @@ peoplesoft_api.py — PeopleSoft IB REST API CLI 封装
    Token 缓存: ~/.peoplesoft/cache/.ps_token_cache.<environment>.json（服务端通常 12 小时有效，客户端缓存 11 小时）
 """
 
-import sys, os, json, base64, re, urllib.request, urllib.error, argparse, time, getpass
+import sys, os, json, base64, re, urllib.request, urllib.error, argparse, time, getpass, tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -48,12 +48,9 @@ CONFIG_PATH = Path(os.environ.get("PEOPLESOFT_CONFIG", str(DATA_DIR / "config.js
 TOKEN_CACHE_DIR = Path(os.environ.get("PEOPLESOFT_CACHE_DIR", str(DATA_DIR / "cache")))
 LEGACY_TOKEN_CACHE = TOKEN_CACHE_DIR / ".ps_token_cache.json"
 PROJECT_STATE_PATH = Path(os.environ.get("PEOPLESOFT_PROJECTS", str(DATA_DIR / "projects.json")))
-TOKEN_CACHE_TTL = 11 * 60 * 60  # PeopleSoft token 通常有效 12 小时，提前 1 小时刷新
-
-# IB REST 网关 URL 里的「本地节点名」段。PSFT_HR 是 PeopleSoft HCM 出厂默认，
-# 但客户在实施时几乎都会改名（HCM_DEV / XX_HRMS 之类），所以必须可配置。
 DEFAULT_NODE = "PSFT_HR"
 NODE_ENV_VAR = "PEOPLESOFT_NODE"
+TOKEN_CACHE_TTL = 11 * 60 * 60  # PeopleSoft token 通常有效 12 小时，提前 1 小时刷新
 
 
 # ── 配置 ──────────────────────────────────────────────
@@ -107,20 +104,12 @@ def _load_runtime():
 
 
 def _resolve_node(cfg):
-    """目标库的本地节点名（IB REST 网关 URL 里那一段）。
-
-    优先级：环境变量 > config.json 的 node 字段 > 出厂默认 PSFT_HR。
-    写死会让改了节点名的环境完全无法使用，且报错与「接口未部署」不同、容易误判。
-    """
-    return (
-        os.environ.get(NODE_ENV_VAR)
-        or str(cfg.get("node") or "").strip()
-        or DEFAULT_NODE
-    )
+    """Preserve configurable local IB nodes from earlier releases."""
+    return os.environ.get(NODE_ENV_VAR) or str(cfg.get("node") or "").strip() or DEFAULT_NODE
 
 
 def _ib_url(endpoint):
-    """拼接 IB REST 网关地址：{PIA}/PSIGW/RESTListeningConnector/{本地节点}/{Service Operation}/"""
+    """Build the IB gateway URL using the target environment's local node."""
     return f"{BASE_URL}/PSIGW/RESTListeningConnector/{NODE}/{endpoint}"
 
 
@@ -176,39 +165,56 @@ def _write_config(doc):
 
 
 # ── Project 状态 ──────────────────────────────────────
-# 「上次使用的 Project」，按环境分节存在同一个文件里，所以 env use 切换后自动跟随，
-# 不需要在 _reload_runtime() 里重绑路径。
-def _load_project_state():
-    """读取 Project 状态。任何读取异常都退化为空状态 —— 该函数在 env init 的
-    启动路径上被间接触发，抛异常会连带打断无 config 机器的初始化。"""
-    try:
-        state = json.loads(PROJECT_STATE_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, ValueError, TypeError):
-        return {}
-    return state if isinstance(state, dict) else {}
-
-
+# 「上次使用的 Project」记录在 config.json 当前环境的 active_project 字段，
+# env use 切换环境后自动跟随，不需要单独的状态文件。
 def _active_project():
     """当前环境记录的活动 Project；没有记录时返回 None。"""
-    entry = _load_project_state().get(ENVIRONMENT)
-    if isinstance(entry, dict):
-        name = entry.get("active_project")
-        return str(name) if name else None
-    return None
+    name = _cfg.get("active_project")
+    if not name:
+        # Earlier public releases stored Project choices outside config.json.
+        try:
+            legacy = json.loads(PROJECT_STATE_PATH.read_text(encoding="utf-8"))
+            entry = legacy.get(ENVIRONMENT, {}) if isinstance(legacy, dict) else {}
+            name = entry.get("active_project") if isinstance(entry, dict) else None
+        except (OSError, ValueError, TypeError):
+            name = None
+    return str(name) if name else None
 
 
 def _set_active_project(project_name):
-    """把 project_name 记为当前环境的活动 Project。"""
-    state = _load_project_state()
-    state[ENVIRONMENT] = {"active_project": project_name}
-    _write_json_atomic(PROJECT_STATE_PATH, state)
+    """把 project_name 记为当前环境的活动 Project（写回 config.json）。"""
+    doc = _read_config()
+    environments, active, is_multi_env = _environment_map(doc)
+    if not is_multi_env:
+        # 旧单环境 schema 在首次写入时升级为 environments 结构。
+        doc = {k: v for k, v in doc.items() if k != "peoplesoft"}
+    entry = dict(environments.get(active) or {})
+    entry["active_project"] = project_name
+    environments[active] = entry
+    doc["environments"] = environments
+    doc["active_environment"] = active
+    _write_config(doc)
+    _reload_runtime()
 
 
 class PSAuthError(RuntimeError):
     """认证无法完成。
 
-    detail 原样保留服务端响应体文本 —— SKILL.md 第2步要求 Agent 按响应内容
-    （Routing 缺失 / 未经授权）分流到第3步，所以这里不能吞掉内容，也不能只抛状态码。
+    detail 原样保留服务端响应体文本 —— SKILL.md 的环境检查（preflight 故障分流表）
+    要求 Agent 按响应内容分流到对应参考文档，所以这里不能吞掉内容，也不能只抛状态码。
+    """
+
+    def __init__(self, detail, hint=""):
+        super().__init__(detail)
+        self.detail = detail
+        self.hint = hint
+
+
+class PSAPIError(RuntimeError):
+    """接口调用无法完成（非 JSON 响应、网络失败等）。
+
+    与 PSAuthError 一样保留服务端响应原文，让 Agent 能按 SKILL.md 的环境检查的
+    故障分流表识别「Routing 缺失」「未经授权」等原因，而不是拿到一句裸 traceback。
     """
 
     def __init__(self, detail, hint=""):
@@ -220,29 +226,20 @@ class PSAuthError(RuntimeError):
 def _ib_failure_reason(text):
     """把 IB 网关的失败响应归类成 (类别, 一行可操作的原因)。无法归类返回 (None, "")。
 
-    「环境没准备好」阶段有两种响应，含义完全不同、修法也完全不同，不能混为一谈：
-
-    - `Unable to find a Routing corresponding...`：节点名对，但该 Service Operation
-      没部署 —— 要导入 AD 工程。
-    - HTTP 500 + `找不到与入站请求消息对应的发送处理。 (158,505)`：节点名不对 ——
-      改配置即可。若误判成上一种，用户会白跑一轮 AD 导入（含 DDL Build）。
+    「环境没准备好」阶段有两种响应，修法不同，不能混为一谈：
+    接口未部署要导入 AD 工程；已部署但没授权要去配许可权列表。
     """
     flat = " ".join(str(text).split())
     if "158,505" in flat or "找不到与入站请求消息对应的发送处理" in flat:
-        return "node", (
-            f"节点名可能不正确（当前 node={NODE}）—— 请在目标 PeopleSoft 的 "
-            "PeopleTools > 集成代理 > 集成设置 > 节点 里取标记为 Local Node 的那条名称，"
-            f"再用 env init --node 或环境变量 {NODE_ENV_VAR} 修正。"
-            "这是配置问题，不要重新导入 AD 工程"
-        )
+        return "node", f"节点名可能不正确（node={NODE}）；使用 env init --node 或 {NODE_ENV_VAR} 修正后重试。"
     if "routing corresponding" in flat.lower():
-        return "routing", "接口未部署 —— 参考 references/ad-cli-project-import.md 导入 AD 工程"
+        return "routing", "接口未部署 —— 参考 references/01-auth-api.md#安装 导入 AD 工程"
     lowered = flat.lower()
     if "未经授权" in flat or any(t in lowered for t in (
         "not authorized", "not authorised", "access denied", "permission denied",
     )):
         return "authz", (
-            "授权不足 —— 参考 references/rest-authorization.md，"
+            "授权不足 —— 参考 references/01-auth-api.md#授权，"
             "为该账号所用许可权列表授予对应 Service Operation 的完全访问"
         )
     return None, ""
@@ -266,6 +263,42 @@ def _save_token(token):
         encoding="utf-8",
     )
 
+
+def _artifact_dir():
+    """Return the directory for local read-only PeopleSoft artifacts.
+
+    A caller may provide PEOPLESOFT_TMP_DIR explicitly. When the CLI is run
+    from a normal workspace, use its tmp directory; when it is run from this
+    skill directory, keep the skill checkout clean and use a system temp
+    directory instead.
+    """
+    explicit = os.environ.get("PEOPLESOFT_TMP_DIR")
+    if explicit:
+        return Path(explicit).expanduser()
+
+    cwd = Path.cwd().resolve()
+    skill_dir = SKILL_DIR.resolve()
+    try:
+        cwd.relative_to(skill_dir)
+    except ValueError:
+        return cwd / "tmp"
+    return Path(tempfile.gettempdir()) / "peoplesoft"
+
+
+def _safe_filename(value, fallback="artifact"):
+    """Make a deterministic filename component safe on Windows and POSIX."""
+    name = re.sub(r"[<>:\"/\\|?*\x00-\x1f]+", "_", str(value))
+    name = re.sub(r"\s+", "_", name).strip(" ._")
+    return (name or fallback)[:120]
+
+
+def _cache_artifact(name, suffix, text):
+    """Cache a read-only code/SQL response and return its absolute path."""
+    path = (_artifact_dir() / (_safe_filename(name) + suffix)).resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text or "", encoding="utf-8")
+    return path
+
 def get_token(force_refresh=False):
     """获取 PS_TOKEN（优先使用 11 小时缓存，过期自动刷新）。
 
@@ -277,21 +310,21 @@ def get_token(force_refresh=False):
     if cached and not force_refresh:
         return cached
     if not PASSWORD:
-        print(
-            "ERROR: 当前环境在 config.json 中没有保存密码，无法换取 PS_TOKEN。\n"
-            "       请重新配置该环境的密码：\n"
-            "       python scripts/peoplesoft_api.py env init <name> --url <url> "
-            "--username <user> --force",
-            file=sys.stderr,
+        raise PSAuthError(
+            "当前环境在 config.json 中没有保存密码，无法换取 PS_TOKEN。",
+            hint=(
+                "请重新配置该环境的密码："
+                " python scripts/peoplesoft_api.py env init <name> --url <url>"
+                " --username <user> --force"
+            ),
         )
-        sys.exit(1)
     credentials = base64.b64encode(f"{USERNAME}:{PASSWORD}".encode()).decode()
     req = urllib.request.Request(
         _ib_url("PSTOKEN.v1/"),
         headers={"Authorization": f"Basic {credentials}"}
     )
     try:
-        raw = urllib.request.urlopen(req).read()
+        raw = urllib.request.urlopen(req, timeout=PROBE_TIMEOUT).read()
     except urllib.error.HTTPError as exc:
         # 4xx/5xx：网关级失败，响应体里就是「Routing 缺失」或「未经授权」原文。
         # 必须走 _safe_decode —— PIA 默认 GBK，按 UTF-8 解会让中文提示变乱码。
@@ -302,9 +335,12 @@ def get_token(force_refresh=False):
         detail = body.strip() or f"HTTP {exc.code} {exc.reason}"
         _, hint = _ib_failure_reason(detail)
         raise PSAuthError(detail, hint=hint) from exc
-    except urllib.error.URLError as exc:
+    except (TimeoutError, urllib.error.URLError, OSError) as exc:
+        reason = getattr(exc, "reason", exc)
+        if isinstance(exc, TimeoutError) or "timed out" in str(exc).lower():
+            reason = f"请求超过 {PROBE_TIMEOUT} 秒无响应"
         raise PSAuthError(
-            f"无法连接 {BASE_URL}：{exc.reason}",
+            f"无法连接 {BASE_URL}：{reason}",
             hint="请检查 PIA 地址、网络连通性和代理设置是否正确。",
         ) from exc
 
@@ -352,22 +388,48 @@ def _safe_decode(raw_bytes):
     return raw_bytes.decode("utf-8", errors="replace")
 
 def _clean_json_text(raw):
-    """把 JSON 字符串内部的裸控制字符转义，让 json.loads 能解析。"""
-    cr, lf, tab = chr(13), chr(10), chr(9)
-    return re.sub(
-        r'"[^"]*"',
-        lambda m: m.group(0).replace(cr + lf, '\\n').replace(lf, '\\n').replace(cr, '\\r').replace(tab, '\\t'),
-        raw,
-    )
+    """Escape bare control characters inside strings, respecting escaped quotes."""
+    result = []
+    in_string = escaped = False
+    for char in raw:
+        if in_string:
+            if escaped:
+                result.append(char)
+                escaped = False
+                continue
+            if char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            elif ord(char) < 32:
+                result.append(json.dumps(char)[1:-1])
+                continue
+        elif char == '"':
+            in_string = True
+        result.append(char)
+    return "".join(result)
 
 def _shorten(text, limit=200):
     """压平空白并截断，用于单行错误摘要。"""
     flat = " ".join(str(text).split())
     return flat if len(flat) <= limit else flat[:limit] + "…"
 
+# 单次 API 请求超时（秒）；None = 不限制。真实业务操作（如 record build / ae 修改）
+# 可能合法地跑很久，所以默认不限；通过子命令选项 --timeout <秒> 设置上限，
+# 避免网关假死时客户端无限挂起。
+REQUEST_TIMEOUT = None
+
+
+def _urlopen(req):
+    if REQUEST_TIMEOUT is not None:
+        return urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT)
+    return urllib.request.urlopen(req)
+
+
 def _api_call(endpoint, data=None):
     """通用 API 调用，自动带 PS_TOKEN，返回解析后的 data 字段。token 过期自动刷新一次。"""
     def do_call(tok):
+        """发一次请求并返回响应原文；HTTP 错误页也取原文，供上层判断。"""
         body = json.dumps(data).encode() if data else None
         req = urllib.request.Request(
             _ib_url(endpoint),
@@ -375,31 +437,56 @@ def _api_call(endpoint, data=None):
             data=body
         )
         try:
-            raw = _safe_decode(urllib.request.urlopen(req).read())
+            return _safe_decode(_urlopen(req).read())
         except urllib.error.HTTPError as e:
-            raw = _safe_decode(e.read())
-        return json.loads(_clean_json_text(raw))
+            return _safe_decode(e.read())
+        except (TimeoutError, urllib.error.URLError, OSError) as e:
+            reason = getattr(e, "reason", e)
+            if isinstance(e, TimeoutError) or "timed out" in str(reason).lower():
+                reason = f"请求超过 {REQUEST_TIMEOUT} 秒无响应（--timeout 可调整）"
+            raise PSAPIError(
+                f"无法连接 {BASE_URL}：{reason}",
+                hint="请检查 PIA 地址、网络连通性和代理设置是否正确。",
+            ) from e
 
-    try:
-        resp = do_call(get_token())
-    except (json.JSONDecodeError, urllib.error.HTTPError):
-        # Likely token expired (non-JSON response). Force refresh once.
+    def parse(raw_text):
         try:
-            body = json.dumps(data).encode() if data else None
-            req = urllib.request.Request(
-                _ib_url(endpoint),
-                headers={"PS_TOKEN": get_token(), "Content-Type": "application/json"},
-                data=body
-            )
-            raw = _safe_decode(urllib.request.urlopen(req).read())
-        except urllib.error.HTTPError as e:
-            raw = _safe_decode(e.read())
-        if "PSFT Authentication token failed" in raw:
-            # get_token(force_refresh=True) 走的就是 Basic 认证换新 token 的流程
-            resp = do_call(get_token(force_refresh=True))
-        else:
-            # Re-raise the original JSON decode / HTTP error
-            raise
+            value = json.loads(raw_text)
+        except json.JSONDecodeError:
+            try:
+                value = json.loads(_clean_json_text(raw_text))
+            except json.JSONDecodeError:
+                return None
+        return value if isinstance(value, dict) else None
+
+    def fail(raw_text):
+        _, reason = _ib_failure_reason(raw_text)
+        detail = _shorten(raw_text, 300) or "服务端返回了空响应"
+        hint = reason or (
+            "服务端返回非 JSON 响应，通常是网关报错或 token 失效；"
+            "先运行 preflight 查看故障分流。"
+        )
+        raise PSAPIError(detail, hint=hint)
+
+    raw = do_call(get_token())
+    resp = parse(raw)
+    if resp is None:
+        # Only retry reads or explicit authentication failures. A malformed
+        # mutation response can follow a committed save; resubmitting duplicates it.
+        read_actions = {"view", "struct", "structDeep", "default", "exists",
+                        "viewPeopleCode", "viewCode", "viewSQL", "list", "search"}
+        action = data.get("operationType") if isinstance(data, dict) else None
+        is_read = endpoint.startswith(("AI_SEARCH_DEFN.", "AI_QUERY_RECORD.", "AI_OPER_FIELD_DEFN.")) or action in read_actions
+        if "psft authentication token failed" in raw.lower():
+            raw = do_call(get_token(force_refresh=True))
+            resp = parse(raw)
+        elif is_read:
+            raw = do_call(get_token())
+            resp = parse(raw)
+        if resp is None:
+            if not is_read:
+                raise PSAPIError(_shorten(raw, 300), hint="写入响应无法解析，保存可能已经完成；先回读目标，不要直接重复提交。")
+            fail(raw)
 
     if resp.get("code") != 0:
         print(f"API Error [{resp.get('code')}]: {resp.get('message')}", file=sys.stderr)
@@ -409,6 +496,108 @@ def _api_call(endpoint, data=None):
 def json_escape(text):
     """JSON 转义（等同于 Commons StringEscapeUtils.escapeJson）"""
     return json.dumps(text)[1:-1]
+
+
+def _normalize_dbtype(value):
+    """Normalize names/metadata character codes to the legacy API platform codes."""
+    value = str(value).strip().upper()
+    aliases = {"": "", "DEFAULT": "", "32": "", "DB2": "1", "49": "1",
+               "ORACLE": "2", "50": "2", "INFORMIX": "3", "51": "3",
+               "DB2UNIX": "4", "52": "4", "TIMESTEN": "5", "53": "5",
+               "SYBASE": "6", "54": "6", "MICROSOFT": "7", "SQLSERVER": "7", "55": "7"}
+    if value in aliases:
+        return aliases[value]
+    if value in {"1", "2", "3", "4", "5", "6", "7"}:
+        return value
+    raise PSAPIError(f"Unsupported dbType: {value}", hint="Use DEFAULT/32, ORACLE/50, or legacy codes 1–7.")
+
+
+def _peoplecode_signature(code):
+    """Ignore compiler formatting and comments while preserving string literals."""
+    tokens = re.findall(r'"(?:[^"]|"")*"|/\*[\s\S]*?\*/|\bREM\b[^;]*;|\s+|.', code or "", re.I)
+    return "".join(t if t.startswith('"') else t.casefold()
+                   for t in tokens if not t.isspace() and not t.startswith("/*")
+                   and not re.match(r"^REM\b", t, re.I))
+
+
+def _write_verified_peoplecode(endpoint, payload, code):
+    if not isinstance(code, str) or not code.strip():
+        raise PSAPIError("Empty PeopleCode is not deletion; use delete-code to remove the native program.")
+    _api_call(endpoint, payload)
+    view = {k: v for k, v in payload.items() if k.lower() != "peoplecode"}
+    view["operationType"] = "viewPeopleCode"
+    actual = _api_call(endpoint, view).get("peoplecode") or ""
+    if _peoplecode_signature(actual) != _peoplecode_signature(code):
+        raise PSAPIError("PeopleCode write was acknowledged but readback differs.",
+                         hint="Inspect the server compilation result and saved source before continuing.")
+    return actual
+
+
+def _delete_verified_peoplecode(endpoint, payload, args):
+    """Delete the native program, independently verify absence, then register it."""
+    project = getattr(args, "project", None) or _active_project()
+    if not project:
+        raise PSAPIError("delete-code requires --project or an active Project.")
+    project_payload = {"projectName": project, "operationType": "struct"}
+    _api_call("AI_OPER_PROJECT_DEFN.v1/", project_payload)
+    view = dict(payload, operationType="viewPeopleCode")
+    before = _api_call(endpoint, view)
+    if before.get("programExists") is not True:
+        raise PSAPIError("No native PeopleCode program was confirmed; deploy the deletion handler or check the exact key.")
+    snapshot = _cache_artifact("delete_" + str(time.time_ns()) + "_" + "_".join(str(v) for v in payload.values()),
+        ".pcode", before.get("peoplecode") or "")
+    dry = bool(getattr(args, "dry_run", False))
+    result = _api_call(endpoint, dict(payload, operationType="deletePeopleCode", dryRun=dry,
+        expectedCode=json_escape(before.get("peoplecode") or "")))
+    item = result.get("projectItem")
+    required = {"objectType"} | {f"objectId{i}" for i in range(1, 5)} | {f"objectValue{i}" for i in range(1, 5)}
+    if not isinstance(item, dict) or not required <= set(item):
+        raise PSAPIError("Deletion response lacks the complete Project key; inspect program and Project state.")
+    if result.get("dryRun") is not dry or result.get("deleted") is not (not dry) or result.get("programExists") is not dry:
+        raise PSAPIError("Server did not confirm the requested native deletion state; inspect before retrying.")
+    actual = _api_call(endpoint, view)
+    if actual.get("programExists") is not dry:
+        raise PSAPIError("Independent native PeopleCode existence readback differs.")
+    if dry:
+        if actual.get("peoplecode") != before.get("peoplecode"):
+            raise PSAPIError("PeopleCode changed during dry-run; read the latest source.")
+    else:
+        try:
+            def matches():
+                rows = _api_call("AI_OPER_PROJECT_DEFN.v1/", project_payload).get("items", [])
+                return [r for r in rows if _project_item_key(r) == _project_item_key(item)]
+            rows = matches()
+            if not rows:
+                _api_call("AI_OPER_PROJECT_DEFN.v1/", dict(item, projectName=project, operationType="insertItem", upgradeAction=1, takeAction=1))
+                rows = matches()
+            if len(rows) != 1:
+                raise PSAPIError("Expected one exact Project deletion item.")
+            flags = {"upgradeAction": 1, "takeAction": 1, "copyDone": 0}
+            if any(rows[0].get(k) != v for k, v in flags.items()):
+                _api_call("AI_OPER_PROJECT_DEFN.v1/", dict(item, projectName=project, operationType="updateItem", **flags))
+            rows = matches()
+            if len(rows) != 1 or any(rows[0].get(k) != v for k, v in flags.items()):
+                raise PSAPIError("Project deletion flags did not match after readback.")
+        except (PSAPIError, SystemExit) as exc:
+            raise PSAPIError("Native program deletion succeeded, but Project registration failed; inspect the saved key before retrying.") from exc
+    result.update(environment=ENVIRONMENT, project=project, snapshotPath=str(snapshot), readbackVerified=True)
+    if getattr(args, "output", None):
+        _write_json_atomic(Path(args.output).resolve(), result)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return result
+
+def _load_json_arg(spec, label):
+    """解析 <file> 或内联 JSON 参数；内容非法时给干净错误而不是裸 traceback。"""
+    try:
+        path = Path(spec)
+        text = path.read_text(encoding="utf-8") if path.exists() else spec
+        return json.loads(text)
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        print(
+            f"ERROR: {label} 不是有效的 JSON，也不是可读取的 JSON 文件：{exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 # ═══════════════════════════════════════════════════════
 #  子命令
@@ -420,88 +609,6 @@ def cmd_auth(args):
     action = "refreshed" if args.refresh else "ready"
     print(f"PS_TOKEN {action} for environment: {ENVIRONMENT}")
     print("Token cached. Reused for up to 11 hours; server token is usually valid for 12 hours.")
-
-
-# ── bundle-check ──────────────────────────────────────
-def cmd_bundle_check(args):
-    """Fail fast when the AD file project omits required local dependencies."""
-    bundle_root = Path(args.bundle_root).resolve()
-    project_dir = bundle_root / args.project
-    xml_path = project_dir / f"{args.project}.XML"
-    ini_path = project_dir / f"{args.project}.ini"
-    failures = []
-    if not xml_path.exists():
-        failures.append(f"missing file project XML: {xml_path}")
-    if not ini_path.exists():
-        failures.append(f"missing file project INI: {ini_path}")
-    if failures:
-        for failure in failures:
-            print(f"FAIL {failure}")
-        sys.exit(1)
-
-    xml_text = xml_path.read_text(encoding="utf-8", errors="replace")
-    ini_text = ini_path.read_text(encoding="utf-8", errors="replace")
-    tools_release = re.search(r"(?m)^TOOLSREL=(.+)$", ini_text)
-    print(f"Bundle: {project_dir}")
-    print(f"TOOLSREL: {tools_release.group(1).strip() if tools_release else 'unknown'}")
-
-    manifest_match = re.search(
-        r'<rowset name="PjmPit"[^>]*>(.*?)</rowset>',
-        xml_text,
-        flags=re.DOTALL,
-    )
-    if not manifest_match:
-        print("FAIL Project manifest PjmPit not found")
-        sys.exit(1)
-    manifest = manifest_match.group(1)
-    rows = re.findall(r"<row>(.*?)</row>", manifest, flags=re.DOTALL)
-    items = set()
-    for row in rows:
-        def value(index):
-            match = re.search(
-                rf"<szObjectValue_{index}>(.*?)</szObjectValue_{index}>",
-                row,
-                flags=re.DOTALL,
-            )
-            return match.group(1).strip() if match else ""
-
-        type_match = re.search(r"<eObjectType>(\d+)</eObjectType>", row)
-        if type_match:
-            items.add((int(type_match.group(1)), value(0), value(1), value(2)))
-
-    required_classes = {
-        (58, "C_META_DATA_PKG", "MetaData", "OperFieldDefn"),
-        (58, "C_META_DATA_PKG", "RecordQuery", "OperQueryRecord"),
-        (58, "C_PORTAL_PKG", "Util", "JSONObject"),
-    }
-    for item in sorted(required_classes):
-        if item not in items:
-            failures.append(
-                "Project manifest missing Application Package class: "
-                + ":".join(item[1:])
-            )
-
-    sql_in_code = set(re.findall(r"SQL\.((?:C_AI|C_META)_[A-Z0-9_]+)", xml_text))
-    project_sql = {value1 for typ, value1, _, _ in items if typ == 30}
-    for sql_id in sorted(sql_in_code - project_sql):
-        failures.append(f"Project manifest missing SQL Definition: {sql_id}")
-
-    required_operations = {
-        "AI_OPER_APP_ENGINE_POST", "AI_OPER_APP_PKG_POST",
-        "AI_OPER_COMPONENT_DEFN_POST", "AI_OPER_FIELD_DEFN_POST",
-        "AI_OPER_PAGE_DEFN_POST", "AI_OPER_PROJECT_DEFN_POST",
-        "AI_OPER_RECORD_DEFN_POST", "AI_OPER_SQL_DEFN_POST",
-        "AI_QUERY_RECORD_POST", "AI_SEARCH_DEFN_POST", "PSTOKEN_GET",
-    }
-    project_operations = {value1 for typ, value1, _, _ in items if typ == 80}
-    for operation in sorted(required_operations - project_operations):
-        failures.append(f"Project manifest missing Service Operation: {operation}")
-
-    if failures:
-        for failure in failures:
-            print(f"FAIL {failure}")
-        sys.exit(1)
-    print("PASS bundle manifest contains required local classes, SQL Definitions, and Service Operations.")
 
 
 # ── healthcheck ───────────────────────────────────────
@@ -516,11 +623,11 @@ def _probe_api(endpoint, payload):
             data=body,
         )
         try:
-            raw = _safe_decode(urllib.request.urlopen(req).read())
+            raw = _safe_decode(urllib.request.urlopen(req, timeout=PROBE_TIMEOUT).read())
         except urllib.error.HTTPError as exc:
             raw = _safe_decode(exc.read())
     except PSAuthError as exc:
-        # 认证层失败：透出服务端原文，让 Agent 能按 SKILL.md 第3步分流
+        # 认证层失败：透出服务端原文，让 Agent 能按 SKILL.md 的环境检查的故障分流表处理
         return False, _shorten(exc.detail)
     except (OSError, urllib.error.URLError, urllib.error.HTTPError, KeyError, ValueError) as exc:
         return False, f"network or authentication error: {exc}"
@@ -553,11 +660,20 @@ def _probe_api(endpoint, payload):
     return False, f"application error ({detail})"
 
 
+# 探测用哨兵值：故意用不存在的名字，让服务端回「找不到定义」或返回 0 行，
+# 既证明该 Service Operation 已部署且被放行，又不会改动/读取任何真实数据。
+PROBE_VALUE = "__PS_METADATA_PROBE__"
+
+# 探测与认证本该快速返回，设上界避免网关不响应时客户端无限挂起。
+# 真实业务操作（如 record build / ae 修改）可能合法地跑很久，故 _api_call 不设此上界。
+PROBE_TIMEOUT = 60
+
+
 def _build_probes(package_root="C_META_DATA_PKG", record="JOB", component="JOB_DATA",
                   page="JOB_DATA1", field="EMPLID", query_record="JOB",
-                  query_field="EMPLID", ae_id="__PS_METADATA_PROBE__",
-                  sql_id="__PS_METADATA_PROBE__", project="C_META_DATA_PKG"):
-    """10 个 Service Operation 的只读探测清单。healthcheck 与 preflight 共用。
+                  query_field="EMPLID", ae_id=PROBE_VALUE,
+                  sql_id=PROBE_VALUE, project="C_META_DATA_PKG"):
+    """15 个 Service Operation 的只读探测清单。healthcheck 与 preflight 共用。
 
     ae_id / sql_id 故意用不存在的名字：服务端回「找不到定义」恰好证明请求被到达
     且已放行，同时不会改动任何元数据。
@@ -589,8 +705,26 @@ def _build_probes(package_root="C_META_DATA_PKG", record="JOB", component="JOB_D
             "sqlId": sql_id, "operationType": "view",
         }),
         ("AI_QUERY_RECORD_POST", "AI_QUERY_RECORD.v1/", {
-            "record": query_record, "fields": [query_field], "maxRows": 1,
+            "record": query_record,
+            "fields": [query_field],
+            # 必须带 filter。不带过滤条件的 JOB 查询等于 SELECT EMPLID FROM PS_JOB
+            # 全表扫描，实测网关直接 504 —— maxRows 只是服务端返回行数上限，
+            # 不会变成 SQL 的 ROWNUM/TOP，压不住代价。用不存在的值做等值过滤走
+            # 索引 seek，返回 0 行，同样能证明接口已放行。
+            "filter": [{"field": query_field, "op": "=", "value": PROBE_VALUE}],
+            "maxRows": 1,
         }),
+        ("AI_OPER_SERVICE_DEFN_POST", "AI_OPER_SERVICE_DEFN.v1/", {
+            "kind": "service", "operationType": "exists", "name": PROBE_VALUE}),
+        ("AI_OPER_SERVICE_OP_POST", "AI_OPER_SERVICE_OP.v1/", {
+            "kind": "operation", "operationType": "exists", "name": PROBE_VALUE}),
+        ("AI_OPER_MENU_DEFN_POST", "AI_OPER_MENU_DEFN.v1/", {
+            "kind": "menu", "operationType": "exists", "name": PROBE_VALUE}),
+        ("AI_OPER_MESSAGE_CATALOG_POST", "AI_OPER_MESSAGE_CATALOG.v1/", {
+            "kind": "catalog", "operationType": "exists", "name": "32767"}),
+        ("AI_OPER_PORTAL_REGISTRY_POST", "AI_OPER_PORTAL_REGISTRY.v1/", {
+            "kind": "portal", "operationType": "exists", "name": PROBE_VALUE,
+            "PortalName": "EMPLOYEE", "RefType": "F"}),
     )
 
 
@@ -600,11 +734,11 @@ def cmd_preflight(args):
     只读 —— 不发任何写请求。这是新用户/新环境的统一入口：先跑它看清卡在哪，
     再按 NEXT 走，而不是自己猜该执行什么。
     """
-    print(f"Preflight: environment={ENVIRONMENT}  node={NODE}  user={USERNAME}")
+    print(f"Preflight: environment={ENVIRONMENT}  user={USERNAME}")
     print(f"  pia:    {BASE_URL}")
     print(f"  config: {CONFIG_PATH}")
 
-    # [1] 认证。PSTOKEN 也走同一个网关，所以这一步同时反映节点名是否正确。
+    # [1] 认证
     auth_reason = None
     auth_kind = None
     try:
@@ -640,19 +774,23 @@ def cmd_preflight(args):
     # NEXT：只给一条最重要的下一步，避免让用户面对一堆选项
     print()
     if auth_kind == "node":
-        print(f"NEXT: 修正节点名（当前 node={NODE}），改完重跑本命令；不要导入 AD 工程。")
+        print("NEXT: 修正目标环境的 IB 本地节点配置，然后重跑 preflight。")
     elif auth_kind == "routing":
-        print("NEXT: 该环境缺少元数据 Api。读 references/ad-cli-project-import.md 导入 AD 工程。")
+        print("NEXT: 该环境缺少元数据 Api。读 references/01-auth-api.md#安装 导入 AD 工程。")
     elif auth_kind == "authz":
-        print("NEXT: 接口已部署但授权不足。读 references/rest-authorization.md 完成授权，"
+        print("NEXT: 接口已部署但授权不足。读 references/01-auth-api.md#授权 完成授权，"
               "然后重跑本命令确认全部通过。")
     elif auth_reason:
-        print("NEXT: 认证未通过，按上面 [1] 的报错原文处理（见 SKILL.md 第3步）。")
+        print("NEXT: 认证未通过，按上面 [1] 的报错原文处理（见 SKILL.md 的环境检查）。")
     elif any("导入 AD 工程" in d for _, d in failures):
-        print("NEXT: 该环境缺少元数据 Api。读 references/ad-cli-project-import.md 导入 AD 工程。")
-    elif failures:
-        print("NEXT: 接口已部署但授权不足。读 references/rest-authorization.md 完成授权，"
+        print("NEXT: 该环境缺少元数据 Api。读 references/01-auth-api.md#安装 导入 AD 工程。")
+    elif any("节点名可能不正确" in d for _, d in failures):
+        print("NEXT: 修正目标环境的 IB 本地节点配置，然后重跑 preflight。")
+    elif any(_ib_failure_reason(d)[0] == "authz" for _, d in failures):
+        print("NEXT: 接口已部署但授权不足。读 references/01-auth-api.md#授权 完成授权，"
               "然后重跑本命令确认全部通过。")
+    elif failures:
+        print("NEXT: 按 FAIL 详情排查部署、源码兼容性或运行时错误，再重跑 preflight。")
     elif not active:
         print("NEXT: 环境已就绪。用 `project use <name>` 选定工作 Project 后即可开始开发。")
     else:
@@ -701,7 +839,7 @@ def cmd_healthcheck(args):
     if failures:
         print("Health check failed: " + ", ".join(failures), file=sys.stderr)
         sys.exit(1)
-    print("Health check passed: PSTOKEN_GET plus all 10 ps-metadata operations.")
+    print(f"Health check passed: PSTOKEN_GET plus all {len(probes)} ps-metadata operations.")
 
 
 # ── environment ───────────────────────────────────────
@@ -729,9 +867,7 @@ def _print_environment(name, cfg, active):
     marker = "*" if name == active else " "
     url = str(cfg.get("pia_base_url", "")).rstrip("/")
     username = cfg.get("username", "")
-    node = _resolve_node(cfg)
-    note = "" if node == DEFAULT_NODE else "  ← 非默认节点"
-    print(f"{marker} {name}: {url} (user={username}, node={node}){note}")
+    print(f"{marker} {name}: {url} (user={username})")
 
 
 def _prompt_required(label, value=None):
@@ -814,8 +950,16 @@ def _init_config(args):
         "pia_base_url": url,
         "username": username,
         "password": password,
-        "node": (args.node or "").strip() or DEFAULT_NODE,
     }
+    previous = environments.get(name)
+    node = getattr(args, "node", None)
+    if node:
+        entry["node"] = node.strip()
+    elif isinstance(previous, dict) and previous.get("node"):
+        entry["node"] = previous["node"]
+    if isinstance(previous, dict) and previous.get("active_project"):
+        # 覆盖已有环境时保留上次使用的 Project。
+        entry["active_project"] = previous["active_project"]
     environments[name] = entry
     old_active = doc.get("active_environment")
     doc["environments"] = environments
@@ -926,6 +1070,11 @@ def cmd_search(args):
 # ── app-pkg ───────────────────────────────────────────
 def cmd_app_pkg(args):
     payload = {"packageRoot": args.pkg}
+    if args.op == "delete-code":
+        parts = (args.classpath or "").split(":")
+        if not 2 <= len(parts) <= 4 or parts[0] != args.pkg or any(not p for p in parts):
+            raise PSAPIError("delete-code requires a complete class path under the given package root.")
+        return _delete_verified_peoplecode("AI_OPER_APP_PKG_POST.v1/", dict(payload, classPath=args.classpath), args)
     if args.op == "struct":
         payload["operationType"] = "default"
         data = _api_call("AI_OPER_APP_PKG_POST.v1/", payload)
@@ -937,14 +1086,20 @@ def cmd_app_pkg(args):
         payload["operationType"] = "viewPeopleCode"
         payload["classPath"] = args.classpath
         data = _api_call("AI_OPER_APP_PKG_POST.v1/", payload)
-        print(data.get("peoplecode", ""))
+        code = data.get("peoplecode", "")
+        print(code)
+        path = _cache_artifact(f"{args.pkg}_{args.classpath}", ".pcode", code)
+        print(f"Cached: {path}")
     elif args.op == "modify-code":
+        if not args.file:
+            print("ERROR: modify-code requires <file>", file=sys.stderr)
+            sys.exit(1)
         code = Path(args.file).read_text(encoding="utf-8") if Path(args.file).exists() else args.file
         payload["operationType"] = "modifyPeopleCode"
         payload["classPath"] = args.classpath
         payload["peoplecode"] = json_escape(code)
-        data = _api_call("AI_OPER_APP_PKG_POST.v1/", payload)
-        print("OK — code uploaded and compiled.")
+        _write_verified_peoplecode("AI_OPER_APP_PKG_POST.v1/", payload, code)
+        print("OK — code saved; readback verified.")
     elif args.op == "insert-class":
         payload["operationType"] = "insertClass"
         payload["classPath"] = args.classpath
@@ -974,14 +1129,26 @@ def cmd_sql(args):
         print(f"lastUpdate: {data.get('lastUpdate')}")
         for stmt in data.get("statements", []):
             print(f"\n--- [{stmt.get('market')}/{stmt.get('dbType')}] {stmt.get('effdt')} ---")
-            print(stmt.get("sqlText", ""))
+            sql_text = stmt.get("sqlText", "")
+            print(sql_text)
+            path = _cache_artifact(
+                f"{args.sqlid}_{stmt.get('market')}_{stmt.get('dbType')}_{stmt.get('effdt')}",
+                ".sql",
+                sql_text,
+            )
+            print(f"Cached: {path}")
             if stmt.get("descr"):
                 print(f"descr: {stmt.get('descr')}")
             if stmt.get("comment"):
                 print(f"comment: {stmt.get('comment')}")
     elif args.op == "create":
-        stmt_data = json.loads(Path(args.file).read_text(encoding="utf-8")) if Path(args.file).exists() else json.loads(args.file)
+        if not args.file:
+            print("ERROR: create requires <file> or inline JSON", file=sys.stderr)
+            sys.exit(1)
+        stmt_data = _load_json_arg(args.file, "create 的 JSON")
         for s in stmt_data.get("statements", []):
+            if "dbType" in s:
+                s["dbType"] = _normalize_dbtype(s["dbType"])
             if "sqlText" in s:
                 s["sqlText"] = json_escape(s["sqlText"])
             if "comment" in s:
@@ -1000,10 +1167,25 @@ def cmd_sql(args):
         if args.comment_file:
             payload["comment"] = json_escape(Path(args.comment_file).read_text(encoding="utf-8"))
         data = _api_call("AI_OPER_SQL_DEFN.v1/", payload)
+        if args.sqltext_file:
+            actual = _api_call("AI_OPER_SQL_DEFN.v1/", {"sqlId": args.sqlid, "operationType": "view"})
+            expected_db = 32 if args.dbtype == "" else 48 + int(args.dbtype)
+            matching = [s for s in actual.get("statements", [])
+                        if s.get("market") == args.market and int(s.get("dbType", -1)) == expected_db
+                        and str(s.get("effdt", ""))[:10] == args.effdt]
+            expected_text = Path(args.sqltext_file).read_text(encoding="utf-8")
+            if len(matching) != 1 or re.sub(r"\s+", " ", matching[0].get("sqlText", "")).strip() != re.sub(r"\s+", " ", expected_text).strip():
+                raise PSAPIError("SQL write was acknowledged but the target Statement readback differs.")
         print(f"OK — SQL modified: {args.sqlid}")
 
 # ── ae ────────────────────────────────────────────────
 def cmd_ae(args):
+    if args.op == "delete-code":
+        if not args.sectionid or not args.stepid:
+            raise PSAPIError("AE delete-code requires --sectionid and --stepid.")
+        return _delete_verified_peoplecode("AI_OPER_APP_ENGINE.v1/", dict(aeId=args.aeid,
+            sectionId=args.sectionid, market=args.market, dbType=args.dbtype,
+            effdt=args.effdt, stepId=args.stepid), args)
     if args.op == "struct":
         data = _api_call("AI_OPER_APP_ENGINE.v1/", {
             "aeId": args.aeid, "operationType": "struct"
@@ -1011,7 +1193,7 @@ def cmd_ae(args):
         print(f"AE: {args.aeid}")
         print(f"descr: {data.get('descr', '')}")
         print(f"lastUpdate: {data.get('lastUpdate', '')}")
-        ms = data.get("mainSection", {})
+        ms = data.get("program", {})
         print(f"\nMain Section: {ms.get('sectionType', '')} publicAccess={ms.get('publicAccess', '')}")
         for detail in ms.get("detail", []):
             print(f"\n  [{detail.get('market')}/{detail.get('dbType')}] {detail.get('descr', '')} "
@@ -1073,8 +1255,18 @@ def cmd_ae(args):
         })
         print(f"sqlId: {data.get('sqlId')}  sqlType: {data.get('sqlType')}  stmtCount: {data.get('stmtCount')}")
         print(f"lastUpdate: {data.get('lastUpdate')}")
-        print(f"\n{data.get('sqlText', '')}")
+        sql_text = data.get("sqlText", "")
+        print(f"\n{sql_text}")
+        path = _cache_artifact(
+            f"{args.aeid}_{args.sectionid}_{args.stepid}_{args.actiontype}",
+            ".sql",
+            sql_text,
+        )
+        print(f"Cached: {path}")
     elif args.op == "modify-sql":
+        if not args.file:
+            print("ERROR: modify-sql requires <file>", file=sys.stderr)
+            sys.exit(1)
         sql_text = Path(args.file).read_text(encoding="utf-8") if Path(args.file).exists() else args.file
         data = _api_call("AI_OPER_APP_ENGINE.v1/", {
             "aeId": args.aeid, "operationType": "modifySQL",
@@ -1091,17 +1283,27 @@ def cmd_ae(args):
             "dbType": args.dbtype, "effdt": args.effdt,
             "stepId": args.stepid
         })
-        print(data.get("peoplecode", ""))
+        code = data.get("peoplecode", "")
+        print(code)
+        path = _cache_artifact(
+            f"{args.aeid}_{args.sectionid}_{args.stepid}",
+            ".pcode",
+            code,
+        )
+        print(f"Cached: {path}")
     elif args.op == "modify-code":
+        if not args.file:
+            print("ERROR: modify-code requires <file>", file=sys.stderr)
+            sys.exit(1)
         code = Path(args.file).read_text(encoding="utf-8") if Path(args.file).exists() else args.file
-        data = _api_call("AI_OPER_APP_ENGINE.v1/", {
+        _write_verified_peoplecode("AI_OPER_APP_ENGINE.v1/", {
             "aeId": args.aeid, "operationType": "modifyPeopleCode",
             "sectionId": args.sectionid, "market": args.market,
             "dbType": args.dbtype, "effdt": args.effdt,
             "stepId": args.stepid,
             "peopleCode": json_escape(code)
-        })
-        print("OK — PeopleCode modified.")
+        }, code)
+        print("OK — PeopleCode modified; readback verified.")
     elif args.op == "insert-state-record":
         data = _api_call("AI_OPER_APP_ENGINE.v1/", {
             "aeId": args.aeid, "operationType": "insertStateRecord",
@@ -1117,6 +1319,15 @@ def cmd_ae(args):
 
 # ── component ────────────────────────────────────────
 def cmd_component(args):
+    if args.op == "delete-code":
+        if not args.event or (args.field and not args.record):
+            raise PSAPIError("Component delete-code requires --event; --field also requires --record.")
+        payload = dict(pnlGrpName=args.pnlgrpname, market=args.market or "GBL", event=args.event)
+        if args.record:
+            payload["recordName"] = args.record
+        if args.field:
+            payload["fieldName"] = args.field
+        return _delete_verified_peoplecode("AI_OPER_COMPONENT_DEFN.v1/", payload, args)
     if args.op == "structDeep":
         payload = {"pnlGrpName": args.pnlgrpname, "operationType": "structDeep"}
         if args.market:
@@ -1140,17 +1351,20 @@ def cmd_component(args):
         if not args.event:
             print("ERROR: view-code requires --event", file=sys.stderr)
             sys.exit(1)
-        payload = {"pnlGrpName": args.pnlgrpname, "operationType": "viewPeopleCode", "event": args.event}
+        payload = {"pnlGrpName": args.pnlgrpname, "market": args.market or "GBL", "operationType": "viewPeopleCode", "event": args.event}
         if args.record:
             payload["recordName"] = args.record
         if args.field:
             payload["fieldName"] = args.field
         data = _api_call("AI_OPER_COMPONENT_DEFN.v1/", payload)
         code = data.get("peoplecode")
-        if code:
-            print(code)
-        else:
-            print("(no peoplecode)")
+        print(code if code else "(no peoplecode)")
+        path = _cache_artifact(
+            f"{args.pnlgrpname}_{args.record}_{args.field}_{args.event}",
+            ".pcode",
+            code or "",
+        )
+        print(f"Cached: {path}")
     elif args.op == "modify-code":
         if not args.file:
             print("ERROR: modify-code requires <file>")
@@ -1160,14 +1374,13 @@ def cmd_component(args):
             sys.exit(1)
         code_path = Path(args.file)
         code = code_path.read_text(encoding="utf-8") if code_path.exists() else args.file
-        payload = {"pnlGrpName": args.pnlgrpname, "operationType": "modifyPeopleCode", "event": args.event, "peoplecode": json_escape(code)}
+        payload = {"pnlGrpName": args.pnlgrpname, "market": args.market or "GBL", "operationType": "modifyPeopleCode", "event": args.event, "peoplecode": json_escape(code)}
         if args.record:
             payload["recordName"] = args.record
         if args.field:
             payload["fieldName"] = args.field
-        data = _api_call("AI_OPER_COMPONENT_DEFN.v1/", payload)
-        msg = (data or {}).get("message", "saved")
-        print(f"OK — {msg}")
+        _write_verified_peoplecode("AI_OPER_COMPONENT_DEFN.v1/", payload, code)
+        print("OK — Component PeopleCode saved; readback verified.")
 
 def _print_component_struct_deep(comp_data):
     """Component > Level > Record > Field 层级树（无 Page 层）"""
@@ -1239,6 +1452,11 @@ def _print_component_struct(data):
 
 # ── record ────────────────────────────────────────────
 def cmd_record(args):
+    if args.op == "delete-code":
+        if not args.fieldname or not args.event:
+            raise PSAPIError("Record delete-code requires --fieldname and --event.")
+        return _delete_verified_peoplecode("AI_OPER_RECORD_DEFN.v1/", dict(recordName=args.recname,
+            fieldName=args.fieldname,event=args.event), args)
     if args.op == "struct":
         data = _api_call("AI_OPER_RECORD_DEFN.v1/", {
             "recordName": args.recname, "operationType": "struct"
@@ -1248,7 +1466,7 @@ def cmd_record(args):
         if not args.file:
             print("ERROR: create requires <file> or inline JSON", file=sys.stderr)
             sys.exit(1)
-        rec_data = json.loads(Path(args.file).read_text(encoding="utf-8")) if Path(args.file).exists() else json.loads(args.file)
+        rec_data = _load_json_arg(args.file, "create 的 JSON")
         payload = {"recordName": args.recname, "operationType": "createRecord", **rec_data}
         if "comment" in payload:
             payload["comment"] = json_escape(payload["comment"])
@@ -1271,7 +1489,7 @@ def cmd_record(args):
         if not args.file:
             print("ERROR: modify requires <file> or inline JSON", file=sys.stderr)
             sys.exit(1)
-        rec_data = json.loads(Path(args.file).read_text(encoding="utf-8")) if Path(args.file).exists() else json.loads(args.file)
+        rec_data = _load_json_arg(args.file, "modify 的 JSON")
         if "comment" in rec_data:
             rec_data["comment"] = json_escape(rec_data["comment"])
         data = _api_call("AI_OPER_RECORD_DEFN.v1/", {"recordName": args.recname, "operationType": "modifyRecord", **rec_data})
@@ -1291,7 +1509,14 @@ def cmd_record(args):
             print(f"lastUpdate: {data.get('lastUpdate')}")
         for stmt in data.get("statements", []):
             print(f"\n--- [{stmt.get('market')}/{stmt.get('dbType')}] {stmt.get('effdt')} ---")
-            print(stmt.get("sqlText", ""))
+            sql_text = stmt.get("sqlText", "")
+            print(sql_text)
+            path = _cache_artifact(
+                f"{args.recname}_{stmt.get('market')}_{stmt.get('dbType')}_{stmt.get('effdt')}",
+                ".sql",
+                sql_text,
+            )
+            print(f"Cached: {path}")
             if stmt.get("descr"):
                 print(f"descr: {stmt.get('descr')}")
             if stmt.get("comment"):
@@ -1315,10 +1540,13 @@ def cmd_record(args):
             "fieldName": args.fieldname, "event": args.event
         })
         code = data.get("peoplecode")
-        if code:
-            print(code)
-        else:
-            print("(no peoplecode)")
+        print(code if code else "(no peoplecode)")
+        path = _cache_artifact(
+            f"{args.recname}_{args.fieldname}_{args.event}",
+            ".pcode",
+            code or "",
+        )
+        print(f"Cached: {path}")
     elif args.op == "modify-code":
         if not args.file:
             print("ERROR: modify-code requires <file>")
@@ -1328,12 +1556,12 @@ def cmd_record(args):
             sys.exit(1)
         code_path = Path(args.file)
         code = code_path.read_text(encoding="utf-8") if code_path.exists() else args.file
-        data = _api_call("AI_OPER_RECORD_DEFN.v1/", {
+        _write_verified_peoplecode("AI_OPER_RECORD_DEFN.v1/", {
             "recordName": args.recname, "operationType": "modifyPeopleCode",
             "fieldName": args.fieldname, "event": args.event,
             "peoplecode": json_escape(code)
-        })
-        print("OK — Record PeopleCode modified.")
+        }, code)
+        print("OK — Record PeopleCode modified; readback verified.")
 
 def _print_record_struct(data):
     print(f"Record: {data.get('recName')}")
@@ -1353,15 +1581,74 @@ def _print_record_struct(data):
             print(f"         comment: {idx.get('comment')}")
 
 # ── query-record ─────────────────────────────────────
+QUERY_OPERATORS = frozenset(("=", "!=", "<>", ">", ">=", "<", "<=", "LIKE", "NOT LIKE"))
+QUERY_MAX_ROWS = 1000
+QUERY_MAX_FIELDS = 64
+QUERY_MAX_FILTERS = 50
+
+
+def _validate_query_request(payload):
+    """Reject malformed query inputs before authentication or HTTP.
+
+    This is a CLI guard, not a substitute for server-side metadata validation
+    and bind parameters. Values remain strings for the deployed 8.60 handler.
+    """
+    def fail(detail):
+        raise PSAPIError(f"query-record 参数错误：{detail}")
+
+    def identifier(value, label):
+        if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,127}", value):
+            fail(f"{label} 必须是单一名称，只能包含 ASCII 字母、数字和下划线，并以字母开头。")
+        return value.upper()
+
+    result = {"record": identifier(payload.get("record"), "record")}
+    fields = payload.get("fields")
+    if not isinstance(fields, list) or not 1 <= len(fields) <= QUERY_MAX_FIELDS:
+        fail(f"fields 必须包含 1～{QUERY_MAX_FIELDS} 个字段。")
+    result["fields"] = [identifier(value, f"fields[{index}]") for index, value in enumerate(fields, 1)]
+    if len(set(result["fields"])) != len(result["fields"]):
+        fail("fields 不能包含重复字段。")
+
+    filters = payload.get("filter", [])
+    if not isinstance(filters, list) or len(filters) > QUERY_MAX_FILTERS:
+        fail(f"filter 必须是数组，最多 {QUERY_MAX_FILTERS} 项。")
+    result["filter"] = []
+    for index, item in enumerate(filters, 1):
+        label = f"filter[{index}]"
+        if not isinstance(item, dict) or set(item) != {"field", "op", "value"}:
+            fail(f"{label} 必须是仅含 field、op、value 的对象。")
+        field = identifier(item["field"], label + ".field")
+        operator = item["op"]
+        if not isinstance(operator, str) or operator.upper() not in QUERY_OPERATORS:
+            fail(f"{label}.op 仅支持 =、!=、<>、>、>=、<、<=、LIKE、NOT LIKE。")
+        value = item["value"]
+        if not isinstance(value, str):
+            fail(f'{label}.value 必须是字符串；数字也须写成 "104"，不能写成 104。')
+        if len(value) > 4000 or "\x00" in value:
+            fail(f"{label}.value 最多 4000 个字符，不能包含 NUL。")
+        result["filter"].append({"field": field, "op": operator.upper(), "value": value})
+
+    max_rows = payload.get("maxRows", 200)
+    if type(max_rows) is not int:
+        fail("maxRows 必须是整数。")
+    # Preserve the deployed handler's documented <=0 default behavior.
+    if max_rows <= 0:
+        max_rows = 200
+    if max_rows > QUERY_MAX_ROWS:
+        fail(f"maxRows 不能超过 {QUERY_MAX_ROWS}。")
+    result["maxRows"] = max_rows
+    return result
+
+
 def cmd_query_record(args):
     """业务数据查询：AI_QUERY_RECORD_POST（RecordQuery 子包）"""
-    payload = {"record": args.record, "fields": [f.strip() for f in args.fields.split(",") if f.strip()]}
+    payload = {"record": args.record, "fields": [f.strip() for f in args.fields.split(",")]}
     if args.filter:
-        filt = json.loads(Path(args.filter).read_text(encoding="utf-8")) if Path(args.filter).exists() else json.loads(args.filter)
+        filt = _load_json_arg(args.filter, "--filter")
         payload["filter"] = filt
-    if args.max_rows:
-        payload["maxRows"] = int(args.max_rows)
-    data = _api_call("AI_QUERY_RECORD.v1/", payload)
+    if args.max_rows is not None:
+        payload["maxRows"] = args.max_rows
+    data = _api_call("AI_QUERY_RECORD.v1/", _validate_query_request(payload))
     fields = data.get("fields", [])
     rows = data.get("rows", [])
     print(f"Record: {data.get('record')}  rowCount: {data.get('rowCount', len(rows))}")
@@ -1376,6 +1663,97 @@ def cmd_query_record(args):
         print(" | ".join(str(v) for v in vals))
 
 # ── project ─────────────────────────────────────────
+PROJECT_ACTION_NAMES = {0: "Copy", 1: "Delete", 2: "None", 3: "CopyProp"}
+PROJECT_FLAG_FIELDS = ("upgradeAction", "takeAction", "copyDone")
+
+
+def _parse_project_action(value):
+    actions = {"copy": 0, "delete": 1, "copyprop": 3}
+    try:
+        return actions[value.lower()]
+    except KeyError:
+        raise argparse.ArgumentTypeError("Action must be Copy, Delete or CopyProp.") from None
+
+
+def _parse_project_check(value):
+    states = {"on": 1, "off": 0, "checked": 1, "unchecked": 0,
+              "true": 1, "false": 0, "1": 1, "0": 0}
+    try:
+        return states[value.lower()]
+    except KeyError:
+        raise argparse.ArgumentTypeError("Use on/off, checked/unchecked, true/false or 1/0.") from None
+
+
+def _validate_project_action(object_type, action):
+    if action == 3 and object_type not in (0, 2):
+        raise PSAPIError("CopyProp (upgradeAction=3) is only supported for Record (objectType=0) and Field (objectType=2).")
+
+
+def _project_item_key(item):
+    """Keep all native IDs; normalize only PeopleTools trailing blank padding."""
+    return (item.get("objectType"),) + tuple(
+        (item.get(f"objectId{i}"), (item.get(f"objectValue{i}") or "").rstrip())
+        for i in range(1, 5))
+
+
+def _project_item_flags(item):
+    if any(name not in item for name in PROJECT_FLAG_FIELDS):
+        raise PSAPIError("Project flag readback is incomplete; deploy the ps-cli 2.3.0 server Project first.")
+    return {name: item[name] for name in PROJECT_FLAG_FIELDS}
+
+
+def _format_project_flags(item):
+    action = item.get("upgradeAction")
+    def check(name):
+        value = item.get(name)
+        return {0: "unchecked", 1: "checked"}.get(value, "unknown") + f" ({value})"
+    return (f"Action={PROJECT_ACTION_NAMES.get(action, 'unknown')} ({action}) "
+            f"Upgrade={check('takeAction')} Done={check('copyDone')}")
+
+
+def _update_project_item(args, payload):
+    changes = {name: getattr(args, attr, None) for name, attr in (
+        ("upgradeAction", "upgrade_action"), ("takeAction", "take_action"), ("copyDone", "copy_done"))}
+    changes = {name: value for name, value in changes.items() if value is not None}
+    if not changes:
+        raise PSAPIError("update-item requires --action, --upgrade or --done (numeric aliases are also supported).")
+    for name, value in changes.items():
+        allowed = (0, 1, 2, 3) if name == "upgradeAction" else (0, 1)
+        if value not in allowed:
+            raise PSAPIError(f"Invalid {name}: {value}; expected {allowed}.")
+    if args.object_type is None or not args.value1:
+        raise PSAPIError("update-item requires --object-type and --value1; supply every nonblank --value2..--value4.")
+    _validate_project_action(args.object_type, changes.get("upgradeAction"))
+    ids = [getattr(args, f"id{i}", None) for i in range(1, 5)]
+    if any(value is not None for value in ids) and any(value is None for value in ids):
+        raise PSAPIError("Provide all four --id1..--id4 or omit all four to resolve them from project struct.")
+    values = [(getattr(args, f"value{i}", None) or "").rstrip() for i in range(1, 5)]
+    query = dict(payload, operationType="struct")
+    before = _api_call("AI_OPER_PROJECT_DEFN.v1/", query)
+    matches = [item for item in before.get("items", [])
+               if item.get("objectType") == args.object_type
+               and [(item.get(f"objectValue{i}") or "").rstrip() for i in range(1, 5)] == values
+               and (ids[0] is None or [item.get(f"objectId{i}") for i in range(1, 5)] == ids)]
+    if len(matches) != 1:
+        raise PSAPIError(f"Expected one exact Project item, found {len(matches)}; check project struct and all key values/IDs.")
+    target = matches[0]
+    expected = dict(_project_item_flags(target), **changes)
+    payload.update(operationType="updateItem", objectType=args.object_type, **changes)
+    for i in range(1, 5):
+        payload[f"objectId{i}"] = target[f"objectId{i}"]
+        payload[f"objectValue{i}"] = target[f"objectValue{i}"]
+    result = _api_call("AI_OPER_PROJECT_DEFN.v1/", payload)
+    if result.get("updated") is not True:
+        raise PSAPIError("Server did not confirm the Project item update.")
+    after = _api_call("AI_OPER_PROJECT_DEFN.v1/", query)
+    matches = [item for item in after.get("items", []) if _project_item_key(item) == _project_item_key(target)]
+    if len(matches) != 1 or _project_item_flags(matches[0]) != expected:
+        raise PSAPIError("Project flag readback does not match the requested state; inspect project struct before retrying.")
+    print(f"OK — project item updated and verified: {args.projectname}")
+    print(f"  objectType={target['objectType']} " + " ".join(f"value{i}={values[i-1]!r}" for i in range(1, 5)))
+    print(f"  {_format_project_flags(matches[0])}")
+
+
 def cmd_project(args):
     """操作 Project 定义：AI_OPER_PROJECT_DEFN_POST"""
     if args.op == "current":
@@ -1408,15 +1786,20 @@ def cmd_project(args):
         print(f"OK — project created: {args.projectname}")
         print(f"Current project for environment {ENVIRONMENT}: {args.projectname}")
     elif args.op == "insert-item":
+        if getattr(args, "copy_done", None) is not None:
+            raise PSAPIError("Set Done with project update-item after inserting the item.")
         payload["operationType"] = "insertItem"
         if args.object_type is None:
             print("ERROR: insert-item requires --object-type", file=sys.stderr)
             sys.exit(1)
+        _validate_project_action(args.object_type, args.upgrade_action)
         payload["objectType"] = args.object_type
         if args.value1:
             payload["objectValue1"] = args.value1
-        if args.value2:
+        if args.value2 is not None:
             payload["objectValue2"] = args.value2
+        elif args.object_type == 30:
+            payload["objectValue2"] = "0"
         if args.value3:
             payload["objectValue3"] = args.value3
         if args.value4:
@@ -1426,10 +1809,24 @@ def cmd_project(args):
         # 默认勾上 Upgrade（takeAction=1），保证迁移时该定义会被带到目标库；
         # 服务器端未传时默认 0（不勾选），因此这里必须显式传 1。显式 --take-action 0 可关闭。
         payload["takeAction"] = args.take_action if args.take_action is not None else 1
-        _api_call("AI_OPER_PROJECT_DEFN.v1/", payload)
+        result = _api_call("AI_OPER_PROJECT_DEFN.v1/", payload)
         _set_active_project(args.projectname)
-        print(f"OK — item inserted into project: {args.projectname} (takeAction={payload['takeAction']})")
+        if result.get("inserted") is False:
+            print(f"OK — item already exists in project: {args.projectname}; existing flags preserved. Use update-item to change flags.")
+        else:
+            print(f"OK — item inserted into project: {args.projectname} (takeAction={payload['takeAction']})")
         print(f"Current project for environment {ENVIRONMENT}: {args.projectname}")
+    elif args.op == "update-item":
+        _update_project_item(args, payload)
+    elif args.op == "delete-item":
+        if args.object_type is None or any(getattr(args, f"id{i}") is None for i in range(1, 5)):
+            raise PSAPIError(f"{args.op} requires --object-type and all four --id1..--id4 from project struct.")
+        payload.update(operationType="deleteItem", objectType=args.object_type)
+        for i in range(1, 5):
+            payload[f"objectId{i}"] = getattr(args, f"id{i}")
+            payload[f"objectValue{i}"] = getattr(args, f"value{i}") or ""
+        _api_call("AI_OPER_PROJECT_DEFN.v1/", payload)
+        print(f"OK — project item removed: {args.projectname}")
     elif args.op == "modify":
         payload["operationType"] = "modifyProject"
         if args.descr:
@@ -1443,6 +1840,9 @@ def cmd_project(args):
     elif args.op == "struct":
         payload["operationType"] = "struct"
         data = _api_call("AI_OPER_PROJECT_DEFN.v1/", payload)
+        if getattr(args, "json", False):
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+            return
         print(f"Project: {data.get('projectName')}")
         items = data.get("items", [])
         if not items:
@@ -1450,7 +1850,8 @@ def cmd_project(args):
             return
         print(f"Items ({len(items)}):")
         for it in items:
-            print(f"  objectType={it.get('objectType')}  id1={it.get('objectId1')}  value1={it.get('objectValue1')}  value2={it.get('objectValue2')}  value3={it.get('objectValue3')}  value4={it.get('objectValue4')}  upgrade={it.get('upgradeAction')}  take={it.get('takeAction')}")
+            keys = "  ".join(f"id{i}={it.get(f'objectId{i}')} value{i}={it.get(f'objectValue{i}')}" for i in range(1, 5))
+            print(f"  objectType={it.get('objectType')}  {keys}  {_format_project_flags(it)}")
 
 # ── get-field ────────────────────────────────────────
 def cmd_get_field(args):
@@ -1491,6 +1892,8 @@ def _print_page_struct(data, full=False):
 
 def cmd_page(args):
     """Page 定义操作：AI_OPER_PAGE_DEFN"""
+    if args.op == "delete-code":
+        return _delete_verified_peoplecode("AI_OPER_PAGE_DEFN.v1/", {"pageName": args.pagename}, args)
     if args.op == "struct":
         payload = {"pageName": args.pagename, "operationType": "struct"}
         if args.full:
@@ -1505,15 +1908,17 @@ def cmd_page(args):
         data = _api_call("AI_OPER_PAGE_DEFN.v1/", payload)
         code = data.get("peoplecode")
         print(code if code else "(no Activate PeopleCode)")
+        path = _cache_artifact(f"{args.pagename}_Activate", ".pcode", code or "")
+        print(f"Cached: {path}")
     elif args.op == "modify-code":
         if not args.file:
             print("ERROR: modify-code requires --file", file=sys.stderr)
             sys.exit(1)
-        with open(args.file, encoding="utf-8") as f:
-            code = f.read()
+        code_path = Path(args.file)
+        code = code_path.read_text(encoding="utf-8") if code_path.exists() else args.file
         payload = {"pageName": args.pagename, "operationType": "modifyPeopleCode", "peoplecode": json_escape(code)}
-        _api_call("AI_OPER_PAGE_DEFN.v1/", payload)
-        print(f"OK — page PeopleCode updated: {args.pagename}")
+        _write_verified_peoplecode("AI_OPER_PAGE_DEFN.v1/", payload, code)
+        print(f"OK — page PeopleCode updated; readback verified: {args.pagename}")
     elif args.op == "create":
         payload = {"pageName": args.pagename, "operationType": "createPage"}
         if args.descr:
@@ -1546,8 +1951,6 @@ def cmd_page(args):
             print("ERROR: add-control requires --control-type", file=sys.stderr)
             sys.exit(1)
         payload = {"pageName": args.pagename, "operationType": "addControl", "controlType": args.control_type}
-        for arg, key in (("--rec", "recName"), ("--field", "fieldName")):
-            pass
         if args.rec:
             payload["recName"] = args.rec
         if args.field:
@@ -1652,20 +2055,22 @@ def cmd_page(args):
 #  CLI 入口
 # ═══════════════════════════════════════════════════════
 def main():
-    parser = argparse.ArgumentParser(description="PeopleSoft IB REST API CLI")
+    parser = argparse.ArgumentParser(description="PeopleSoft IB REST 命令行工具")
     sub = parser.add_subparsers(dest="cmd", required=True)
+    from object_operations import add_parsers
+    add_parsers(sub)
 
     # auth
-    p = sub.add_parser("auth", help="Get/refresh PS_TOKEN")
-    p.add_argument("--refresh", action="store_true", help="Ignore the cache and call PSTOKEN.v1")
+    p = sub.add_parser("auth", help="获取或刷新 PS_TOKEN")
+    p.add_argument("--refresh", action="store_true", help="忽略缓存，调用 PSTOKEN.v1")
 
     # preflight
     p = sub.add_parser("preflight", help="体检：报告当前环境距离可用还差什么，并给出下一步（只读）")
-    p.add_argument("--refresh", action="store_true", help="Refresh PS_TOKEN before probing")
+    p.add_argument("--refresh", action="store_true", help="探测前刷新 PS_TOKEN")
 
     # healthcheck
-    p = sub.add_parser("healthcheck", help="Read-only verification of PSTOKEN and all ps-metadata operations")
-    p.add_argument("--refresh", action="store_true", help="Refresh PS_TOKEN before probing")
+    p = sub.add_parser("healthcheck", help="只读验证认证与全部元数据操作")
+    p.add_argument("--refresh", action="store_true", help="探测前刷新 PS_TOKEN")
     p.add_argument("--project", default="C_META_DATA_PKG")
     p.add_argument("--package-root", default="C_META_DATA_PKG")
     p.add_argument("--record", default="JOB")
@@ -1677,38 +2082,37 @@ def main():
     p.add_argument("--ae-id", default="__PS_METADATA_PROBE__")
     p.add_argument("--sql-id", default="__PS_METADATA_PROBE__")
 
-    # bundle-check
-    p = sub.add_parser("bundle-check", help="Validate local AD file-project dependencies before import")
-    p.add_argument("--bundle-root", default=str(SKILL_DIR))
-    p.add_argument("--project", default="C_META_DATA_PKG")
-
     # environment
-    p = sub.add_parser("env", help="List, switch, or initialize PeopleSoft environments")
+    p = sub.add_parser("env", help="列出、切换或初始化 PeopleSoft 环境")
     p.add_argument("op", choices=["list", "current", "use", "init"])
-    p.add_argument("name", nargs="?", help="Environment name for 'use' or 'init'")
-    p.add_argument("--auth", action="store_true", help="Refresh PS_TOKEN after switching or initializing")
-    p.add_argument("--url", dest="pia_url", help="PIA URL for 'env init'")
-    p.add_argument("--username", help="PeopleSoft username for 'env init'")
-    p.add_argument("--node", help=f"IB 本地节点名 for 'env init' (默认 {DEFAULT_NODE})")
-    p.add_argument("--password-stdin", action="store_true", help="Read the init password from stdin instead of prompting")
-    p.add_argument("--force", action="store_true", help="Replace an existing environment during 'env init'")
-    p.add_argument("--keep-current", action="store_true", help="Keep the current active environment during 'env init'")
+    p.add_argument("name", nargs="?", help="use 或 init 的环境名")
+    p.add_argument("--auth", action="store_true", help="切换或初始化后刷新 PS_TOKEN")
+    p.add_argument("--url", dest="pia_url", help="env init 的 PIA 地址")
+    p.add_argument("--username", help="env init 的 PeopleSoft 用户名")
+    p.add_argument("--node", help="目标环境的本地 IB 节点，默认 PSFT_HR")
+    p.add_argument("--password-stdin", action="store_true", help="从标准输入读取初始化密码")
+    p.add_argument("--force", action="store_true", help="env init 时替换已有环境配置")
+    p.add_argument("--keep-current", action="store_true", help="env init 时保留当前活动环境")
 
     # search
-    p = sub.add_parser("search", help="Search definitions")
+    p = sub.add_parser("search", help="搜索定义")
     p.add_argument("type", choices=["record", "field", "sql", "apppkg", "project"])
     p.add_argument("name", nargs="?", default="")
     p.add_argument("--desc", default="")
 
     # app-pkg
-    p = sub.add_parser("app-pkg", help="Operate Application Package")
-    p.add_argument("op", choices=["struct", "view-code", "modify-code", "insert-class", "insert-package"])
+    p = sub.add_parser("app-pkg", help="维护应用包")
+    p.add_argument("op", choices=["struct", "view-code", "modify-code", "delete-code", "insert-class", "insert-package"])
     p.add_argument("pkg")
     p.add_argument("classpath", nargs="?")
     p.add_argument("file", nargs="?")
 
+    p.add_argument("--project", help="delete-code 迁移登记工程，默认当前工程")
+    p.add_argument("--dry-run", action="store_true", help="验证完整程序键和快照，不删除或登记")
+    p.add_argument("--output", help="保存 delete-code 验证结果 JSON")
+
     # sql
-    p = sub.add_parser("sql", help="Operate SQL definitions")
+    p = sub.add_parser("sql", help="维护 SQL 定义")
     p.add_argument("op", choices=["view", "create", "modify"])
     p.add_argument("sqlid")
     p.add_argument("--market", default="GBL")
@@ -1719,10 +2123,10 @@ def main():
     p.add_argument("file", nargs="?")
 
     # ae
-    p = sub.add_parser("ae", help="Operate Application Engine")
+    p = sub.add_parser("ae", help="维护 AE 定义")
     p.add_argument("op", choices=[
         "struct", "create", "insert-section", "insert-step", "insert-action",
-        "view-sql", "modify-sql", "view-code", "modify-code",
+        "view-sql", "modify-sql", "view-code", "modify-code", "delete-code",
         "insert-state-record", "insert-temp-table"
     ])
     p.add_argument("aeid")
@@ -1737,36 +2141,48 @@ def main():
     p.add_argument("--recname")
     p.add_argument("file", nargs="?")
 
+    p.add_argument("--project", help="delete-code 迁移登记工程，默认当前工程")
+    p.add_argument("--dry-run", action="store_true", help="验证完整程序键和快照，不删除或登记")
+    p.add_argument("--output", help="保存 delete-code 验证结果 JSON")
+
     # component
-    p = sub.add_parser("component", help="Operate Component definitions")
-    p.add_argument("op", choices=["struct", "structDeep", "view-code", "modify-code"])
+    p = sub.add_parser("component", help="维护 Component 定义")
+    p.add_argument("op", choices=["struct", "structDeep", "view-code", "modify-code", "delete-code"])
     p.add_argument("pnlgrpname")
     p.add_argument("--market", default="")
-    p.add_argument("--deep", action="store_true", help="Show Page > Level > Record > Field hierarchy")
+    p.add_argument("--deep", action="store_true", help="显示 Page → 层级 → Record → Field 结构")
     p.add_argument("--record")
     p.add_argument("--field")
     p.add_argument("--event")
     p.add_argument("--file")
 
+    p.add_argument("--project", help="delete-code 迁移登记工程，默认当前工程")
+    p.add_argument("--dry-run", action="store_true", help="验证完整程序键和快照，不删除或登记")
+    p.add_argument("--output", help="保存 delete-code 验证结果 JSON")
+
     # record
-    p = sub.add_parser("record", help="Operate Record definitions")
-    p.add_argument("op", choices=["struct", "create", "modify", "build", "alter", "create-view", "view-sql", "modify-sql", "view-code", "modify-code"])
+    p = sub.add_parser("record", help="维护 Record 定义")
+    p.add_argument("op", choices=["struct", "create", "modify", "build", "alter", "create-view", "view-sql", "modify-sql", "view-code", "modify-code", "delete-code"])
     p.add_argument("recname")
     p.add_argument("file", nargs="?")
     p.add_argument("--fieldname")
     p.add_argument("--event")
 
+    p.add_argument("--project", help="delete-code 迁移登记工程，默认当前工程")
+    p.add_argument("--dry-run", action="store_true", help="验证完整程序键和快照，不删除或登记")
+    p.add_argument("--output", help="保存 delete-code 验证结果 JSON")
+
     # query-record
-    p = sub.add_parser("query-record", help="Query business data (AI_QUERY_RECORD_POST)")
-    p.add_argument("record", help="Record name")
-    p.add_argument("fields", help="Comma-separated field names, e.g. EMPLID,EMPL_RCD")
+    p = sub.add_parser("query-record", help="查询业务数据（AI_QUERY_RECORD_POST）")
+    p.add_argument("record", help="Record 名称")
+    p.add_argument("fields", help="逗号分隔的字段名，例如 EMPLID,EMPL_RCD")
     p.add_argument("--filter", help="Filter JSON: [{\"field\":\"EMPLID\",\"op\":\"=\",\"value\":\"0001\"}] or path to JSON file")
-    p.add_argument("--max-rows", help="Max rows (default 200)")
+    p.add_argument("--max-rows", type=int, help="最多返回行数，默认 200，上限 1000；<=0 使用默认值")
 
     # project
-    p = sub.add_parser("project", help="Operate Project definitions (AI_OPER_PROJECT_DEFN_POST)")
-    p.add_argument("op", choices=["create", "insert-item", "modify", "struct", "use", "current"])
-    p.add_argument("projectname", nargs="?", help="Project name; omitted for 'current'")
+    p = sub.add_parser("project", help="维护 Project 定义（AI_OPER_PROJECT_DEFN_POST）")
+    p.add_argument("op", choices=["create", "insert-item", "update-item", "delete-item", "modify", "struct", "use", "current"])
+    p.add_argument("projectname", nargs="?", help="Project 名称；current 时省略")
     p.add_argument("--descr")
     p.add_argument("--comment")
     p.add_argument("--object-type", type=int)
@@ -1774,12 +2190,26 @@ def main():
     p.add_argument("--value2")
     p.add_argument("--value3")
     p.add_argument("--value4")
-    p.add_argument("--upgrade-action", type=int, help="Upgrade action: 0=Copy, 1=Delete, 2=None, 3=Copy Property (default 0)")
-    p.add_argument("--take-action", type=int, help="Whether to include item in upgrade: 0/1 (default 1 = checked)")
+    for i in range(1, 5):
+        p.add_argument(f"--id{i}", type=int, help="从 Project 结构取得的完整 ObjectID，仅用于更新/删除")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--action", dest="upgrade_action", type=_parse_project_action,
+                       metavar="Copy|Delete|CopyProp", help="Project 条目 Action，不区分大小写；CopyProp 仅适用 Record/Field")
+    group.add_argument("--upgrade-action", type=int, choices=[0, 1, 2, 3],
+                       help="Action 数字编码：0=Copy，1=Delete，2=None（历史兼容），3=CopyProp")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--upgrade", dest="take_action", type=_parse_project_check,
+                       metavar="on|off", help="Upgrade 标记；插入默认 on，更新省略则保留")
+    group.add_argument("--take-action", type=int, choices=[0, 1], help="Upgrade 数字编码：0/1")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--done", dest="copy_done", type=_parse_project_check,
+                       metavar="on|off", help="Done 标记，仅 update-item；省略则保留")
+    group.add_argument("--copy-done", type=int, choices=[0, 1], help="Done 数字编码：0/1，仅 update-item")
+    p.add_argument("--json", action="store_true", help="以 JSON 输出 Project 结构")
 
     # page
-    p = sub.add_parser("page", help="Operate Page definitions (AI_OPER_PAGE_DEFN_POST)")
-    p.add_argument("op", choices=["struct", "view-code", "modify-code", "create", "modify-props", "add-control", "del-control", "find", "mod-control"])
+    p = sub.add_parser("page", help="维护 Page 定义（AI_OPER_PAGE_DEFN_POST）")
+    p.add_argument("op", choices=["struct", "view-code", "modify-code", "delete-code", "create", "modify-props", "add-control", "del-control", "find", "mod-control"])
     p.add_argument("pagename")
     p.add_argument("--control-type", help="editBox|dropDown|checkBox|staticText|groupBox|hrule|subPage|scrollArea|htmlArea|pushButton|hyperlink")
     p.add_argument("--rec")
@@ -1806,34 +2236,45 @@ def main():
     p.add_argument("--sub-pnl-name")
     p.add_argument("--html-text")
     p.add_argument("--pb-display-type", type=int)
-    p.add_argument("--field-type", type=int, help="findControls numeric FIELDTYPE filter (e.g. 4=editBox, 27=scrollArea)")
+    p.add_argument("--field-type", type=int, help="findControls 的数值 FIELDTYPE 过滤，例如 4=editBox、27=scrollArea")
     p.add_argument("--edit-size", type=int)
     p.add_argument("--label-type", type=int)
     p.add_argument("--label-loc", type=int)
     p.add_argument("--field-style")
     p.add_argument("--label-style")
-    p.add_argument("--full", action="store_true", help="Include all available raw PSPNLDEFN/PSPNLFIELD columns")
-    p.add_argument("--json", action="store_true", help="Dump raw JSON response")
+    p.add_argument("--full", action="store_true", help="包含可用的 PSPNLDEFN/PSPNLFIELD 原始列")
+    p.add_argument("--json", action="store_true", help="输出原始 JSON 响应")
     p.add_argument("--file")
 
+    p.add_argument("--project", help="delete-code 迁移登记工程，默认当前工程")
+    p.add_argument("--dry-run", action="store_true", help="验证完整程序键和快照，不删除或登记")
+    p.add_argument("--output", help="保存 delete-code 验证结果 JSON")
+
     # get-field
-    p = sub.add_parser("get-field", help="Batch query field definitions (AI_OPER_FIELD_DEFN_POST)")
-    p.add_argument("fields", help="Comma-separated field names, e.g. EMPLID,EFFDT")
+    p = sub.add_parser("get-field", help="批量查询 Field 定义（AI_OPER_FIELD_DEFN_POST）")
+    p.add_argument("fields", help="逗号分隔的字段名，例如 EMPLID,EFFDT")
+
+    # 所有子命令统一的请求超时选项
+    for child in sub.choices.values():
+        child.add_argument(
+            "--timeout", type=int, metavar="SECONDS",
+            help="单个 API 请求的超时秒数（默认不限；网关无响应时使用）",
+        )
 
     args = parser.parse_args()
 
+    global REQUEST_TIMEOUT
+    REQUEST_TIMEOUT = args.timeout
+
     # `env init` is the one command allowed to run without an existing config.
-    if not (
-        (args.cmd == "env" and args.op == "init")
-        or args.cmd == "bundle-check"
-    ):
+    if not (args.cmd == "env" and args.op == "init"):
         _require_runtime()
 
     # 路由
     try:
         _dispatch(args)
-    except PSAuthError as exc:
-        # detail 原样透出：SKILL.md 第2/3步要求 Agent 按响应体文本分流
+    except (PSAuthError, PSAPIError) as exc:
+        # detail 原样透出：SKILL.md 的环境检查故障分流表要求 Agent 按响应体文本分流
         detail = exc.detail if len(exc.detail) <= 2000 else exc.detail[:2000] + "…(truncated)"
         print(f"ERROR: {detail}", file=sys.stderr)
         if exc.hint:
@@ -1842,10 +2283,13 @@ def main():
 
 
 def _dispatch(args):
+    if args.cmd in ("service", "service-op", "menu", "message-catalog", "portal"):
+        from object_operations import execute
+        return execute(sys.modules[__name__], args)
+    if hasattr(args, "dbtype"):
+        args.dbtype = _normalize_dbtype(args.dbtype)
     if args.cmd == "auth":
         cmd_auth(args)
-    elif args.cmd == "bundle-check":
-        cmd_bundle_check(args)
     elif args.cmd == "preflight":
         cmd_preflight(args)
     elif args.cmd == "healthcheck":

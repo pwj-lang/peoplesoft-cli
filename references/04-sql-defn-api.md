@@ -1,19 +1,12 @@
-# AI_OPER_SQL_DEFN API
+# SQL 定义
 
 通过 Integration Broker REST 接口查看、创建和修改 PeopleSoft SQL 定义。
 
 ## 接口地址
 
 ```
-POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_SQL_DEFN.v1/
+POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_SQL_DEFN.v1/
 ```
-
-## 请求头
-
-| Header | 值 | 必填 |
-|--------|-----|------|
-| `Content-Type` | `application/json` | 是 |
-| `PS_TOKEN` | 登录获取的 token | 是 |
 
 ## 请求体公共参数
 
@@ -43,7 +36,7 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_SQL_DEFN.v1/
     "statements": [
       {
         "market": "GBL",
-        "dbType": "ORACLE",
+        "dbType": "32",
         "effdt": "1900-01-01",
         "sqlText": "SELECT EMPLID, NAME FROM PS_EMPLOYEES WHERE EMPLID = :1",
         "descr": "Query employees",
@@ -61,7 +54,7 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_SQL_DEFN.v1/
 | `lastUpdate` | string | 最后更新信息 |
 | `statements` | array | Statement 行数组 |
 | `statements[].market` | string | 市场（如 "GBL"） |
-| `statements[].dbType` | string | 数据库平台名称（如 "ORACLE"） |
+| `statements[].dbType` | string | 元数据字符码（默认 32；Oracle 专用 50；其余 49~55） |
 | `statements[].effdt` | string | 生效日期 |
 | `statements[].sqlText` | string | SQL 文本（JSON 转义） |
 | `statements[].descr` | string | 描述 |
@@ -99,13 +92,7 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_SQL_DEFN.v1/
 
 ## 响应格式
 
-统一 `code/message/data`：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `code` | int | 0=成功，非0=失败 |
-| `message` | string | 成功固定 `"success"`，失败返回原因 |
-| `data` | object | 成功时包含返回数据，失败时为 `{}` |
+公共响应见 [安装说明](01-auth-api.md#公共调用规则)。
 
 ## 编码注意事项
 
@@ -152,3 +139,9 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_SQL_DEFN.v1/
   "sqlText": "SELECT EMPLID, NAME FROM PS_EMPLOYEES WHERE EMPLID = :1"
 }
 ```
+
+## 数据库类型选择和保存核验
+
+输入 `""`、`DEFAULT`、`32` 均定位默认 Statement；ORACLE、2、50 均定位 Oracle 专用 Statement，不能用于默认行。其余兼容输入为 DB2/1/49、INFORMIX/3/51、DB2UNIX/4/52、TIMESTEN/5/53、SYBASE/6/54、MICROSOFT/7/55；CLI 还接受 SQLSERVER。未知值会报错。
+
+modify 找不到完整 market/dbType/effdt 时返回错误，不再更新时间或假报成功。先 view 再按实际行定位。CLI 的 sql modify --sqltext-file 会自动回读并核对目标行和正文；仅修改描述/注释或直接调用 REST 时仍需自行回读。

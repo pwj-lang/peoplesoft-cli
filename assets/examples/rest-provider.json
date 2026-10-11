@@ -1,0 +1,155 @@
+{
+  "operation": {
+    "properties": {
+      "Servicename": "C_MY_SERVICE",
+      "Defaultversion": "v1",
+      "Rtngtype": "S",
+      "Userpwdreq": "N",
+      "RequestStatus": "P",
+      "ActiveDataGuard": 0,
+      "ThinkTime": 0,
+      "ConNav": 0,
+      "Restmethod": "POST",
+      "RestService": 2,
+      "RestBaseurl": "https://ps.example.com/PSIGW/RESTListeningConnector/PSFT_HR/C_MY.v1/",
+      "RestOverride": 0,
+      "Ib_aliasname": "C_MY",
+      "Messagename": "",
+      "Messageversion": "",
+      "Descr": "示例 REST 操作",
+      "Descrlong": "",
+      "LanguageCd": "ZHS",
+      "ObjectOwnerId": ""
+    },
+    "collections": {
+      "Operationuritemplate": [
+        {
+          "URISeq": 1,
+          "URITemplate": "nothing",
+          "RootResource": "",
+          "Ibtransactionid": ""
+        }
+      ]
+    }
+  },
+  "version": {
+    "properties": {
+      "Active_flag": "A",
+      "Validation": "N",
+      "Nr_flag": "N",
+      "Syncnonblock": "N",
+      "Export_flag": "N",
+      "Multi_queue": "Y",
+      "Clientimplement": "N",
+      "ExcludeToken": " ",
+      "Descr": "示例 REST 版本",
+      "Descrlong": "",
+      "LanguageCd": "ZHS",
+      "ObjectOwnerId": ""
+    },
+    "collections": {
+      "Oprverdfnparm": [
+        {
+          "Parametername": "REQUEST",
+          "Messagename": "IB_GENERIC_REST",
+          "Messageversion": "V1",
+          "HTTPStatusCode": 0,
+          "ContentType": "application/json",
+          "Queuename": "",
+          "Xfrmname": "",
+          "Outxfrmname": ""
+        },
+        {
+          "Parametername": "RESPONSE",
+          "Messagename": "IB_GENERIC_REST",
+          "Messageversion": "V1",
+          "HTTPStatusCode": 200,
+          "ContentType": "application/json",
+          "Queuename": "",
+          "Xfrmname": "",
+          "Outxfrmname": ""
+        }
+      ],
+      "Oprvgenrtgparm": [
+        {
+          "Parametername": "PUBSRVCSYNC",
+          "Routingdefnname": "C_MY_ROUTE"
+        }
+      ]
+    },
+    "name": "v1"
+  },
+  "handler": {
+    "properties": {
+      "Handlerid": "RQST",
+      "Handlertype": "ApplicationClass",
+      "Active_flag": "A",
+      "Seqnumber": 0,
+      "Rollback_flag": "N",
+      "Descr": "示例 REST 处理程序",
+      "Descrlong": "",
+      "LanguageCd": "ZHS",
+      "ObjectOwnerId": ""
+    },
+    "collections": {
+      "Operationac": [
+        {
+          "Packageid": "MY_PACKAGE:Handlers",
+          "Packageroot": "MY_PACKAGE",
+          "Qualifypath": "Handlers",
+          "Classname": "MyRestHandler",
+          "Methodname": "OnRequest"
+        }
+      ]
+    },
+    "name": "REQUESTHDLR"
+  },
+  "routing": {
+    "properties": {
+      "Eff_status": "A",
+      "Sendernodename": "~~ANY~~",
+      "Receivernodename": "PSFT_HR",
+      "Operationname": "C_MY_POST",
+      "Operationversion": "v1",
+      "Rtngtype": "S",
+      "Restmethod": "POST",
+      "LocalIndication": 2,
+      "Generated": "N",
+      "Descr": "示例 REST 路由",
+      "Descrlong": "",
+      "LanguageCd": "ZHS",
+      "ObjectOwnerId": ""
+    },
+    "collections": {
+      "Ibrtngsubdefn": [
+        {
+          "Seqnum": 1,
+          "Direction": "I",
+          "Rtngtype": "S",
+          "Sendernodename": "~~ANY~~",
+          "Receivernodename": "PSFT_HR",
+          "Aliasname": "C_MY.v1"
+        }
+      ],
+      "Rtngdfnparm": [
+        {
+          "Parametername": "INREQUEST",
+          "Sendernodename": "~~ANY~~",
+          "Receivernodename": "PSFT_HR",
+          "Aliasname": "C_MY.v1",
+          "Operationversion": "v1"
+        },
+        {
+          "Parametername": "OUTRESPONSE",
+          "Sendernodename": "PSFT_HR",
+          "Receivernodename": "~~ANY~~",
+          "Aliasname": "C_MY.v1",
+          "Operationversion": "v1"
+        }
+      ]
+    },
+    "name": "C_MY_ROUTE",
+    "effdt": "1900-01-01"
+  },
+  "permissionList": "MY_PERMISSION"
+}

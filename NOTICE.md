@@ -1,43 +1,17 @@
-# Notices and source statement
+# 来源与许可说明
 
-## Original project materials
+## 原创内容
 
-According to the maintainer, the Skill instructions, command-line scripts,
-reference documentation, and custom PeopleCode in this repository were
-independently developed by the maintainer with AI assistance. The maintainer
-reviewed and integrated the resulting material, and no code was intentionally
-copied from a specific third-party repository.
+据维护者说明，skill 指令、CLI、参考文档及自定义 PeopleCode 由维护者在 AI 辅助下独立编写、审阅与整合，未有意从特定第三方仓库复制代码。维护者拥有权利的原创内容适用 [MIT 许可证](LICENSE)。
 
-To the extent these original materials are owned by the project contributors,
-they are licensed under the MIT License in `LICENSE`.
+## AD 原生工程
 
-## Application Designer export
+`C_META_DATA_PKG/` 的 XML/INI 由 Oracle PeopleSoft Application Designer 导出，保留原始内容以供导入，可能含 PeopleTools 生成元数据、交付对象标记和必要引用。
 
-`C_META_DATA_PKG/C_META_DATA_PKG.XML` and its companion INI file were exported
-using Oracle PeopleSoft Application Designer. The export is kept unchanged so
-that it remains usable as a PeopleSoft file project. It may contain generated
-metadata, delivered-object identifiers, references, or definitions required by
-PeopleTools.
+MIT 许可证不主张 Oracle 或第三方内容的所有权，也不授予其软件使用权。持有本项目不代表获得 PeopleSoft/PeopleTools 许可证；使用和再分发须遵守适用许可及组织要求。
 
-The MIT License does not assert ownership of, or grant rights to, any Oracle or
-third-party material contained in or referenced by that export. Possession of
-this repository does not grant a PeopleSoft or PeopleTools license. Each user
-must have the licenses and permissions required by Oracle and by their
-organization.
+## 商标与项目关系
 
-## Screenshots and trademarks
+Oracle、PeopleSoft 是 Oracle Corporation 及其关联公司的商标。本项目为独立项目，与 Oracle 无隶属、赞助、认证或背书关系。
 
-Screenshots under `assets/authorization/` depict Oracle software and are
-included only as documentation. Their use is subject to Oracle's published
-screenshot terms and any applicable license or confidentiality obligations.
-They must not be altered except by proportional resizing.
-
-Oracle and PeopleSoft are trademarks of Oracle Corporation and/or its
-affiliates. Other names may be trademarks of their respective owners.
-
-This independent project is not affiliated with, sponsored by, certified by,
-or endorsed by Oracle Corporation or its affiliates.
-
-- https://www.oracle.com/legal/copyright/
-- https://www.oracle.com/legal/trademarks/
-- https://docs.oracle.com/en-us/iaas/Content/legalnotices.htm
+相关规则见 [Oracle 法律声明](https://docs.oracle.com/en-us/iaas/Content/legalnotices.htm) 与 [商标规则](https://www.oracle.com/legal/trademarks/)。

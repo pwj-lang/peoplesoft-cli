@@ -1,38 +1,17 @@
-# Security policy
+# 安全说明
 
-## Release status
+本工具用于受控开发与测试环境，具有元数据写入和数据库 DDL 能力；不直接面向互联网或不受信任的调用者。
 
-This is an early public release intended for controlled development and test
-environments. It exposes operations that can read and modify PeopleTools
-metadata and can cause database DDL to be executed. It is not safe to expose
-directly to the public internet or to untrusted callers.
+## 查询输入保护
 
-## Known limitation
+2026-10-11 在 PANWX25 / Oracle / PeopleTools 8.60.10 修复并验收 `AI_QUERY_RECORD_POST` 的动态 SQL 输入缺陷。CLI 在认证和 HTTP 前校验；服务端另行校验 JSON 类型、单一名称、操作符、参数边界及字段归属，并从 PSRECDEFN 解析已登记的逻辑 Record 或物理表名。过滤值和行数使用 CreateSQL 绑定参数，不拼接值；取消 SQL 失败后的 Rowset.Fill 回退。
 
-The `AI_QUERY_RECORD_POST` implementation dynamically constructs SQL using
-caller-supplied record names, field names, and filter operators. These inputs
-are not yet protected by a complete allowlist and bind-variable design. Treat
-this operation as unsafe for untrusted input.
+直接 REST 的非法请求返回 400，包括数字 JSON filter.value，不再依赖原生 GetString 抛错。69 项绕过 CLI 的回归通过；另以受控 SQL View 验证字符、长数值、小数、日期/时间、空值与 CLOB。部署须使用包含已编译 OperQueryRecord 的完整 1.5.0 或后续包，单独更新 CLI 无法保护直接调用。接口限制见 [业务查询](references/09-query-record-api.md)。
 
-Until this is corrected:
+输入校验没有增加业务组件的行级安全或字段权限检查。查询、元数据及 DDL 使用 PeopleSoft 应用 Access ID 的权限，可能绕过组件处理；为可信用户配置专用最小权限列表，不需要查询时关闭该操作。行数上限限制返回量，不能替代索引过滤或限制数据库扫描成本。其他数据库和 PeopleTools 版本尚未验收。
 
-- deploy only in an isolated, non-production environment;
-- do not grant the service operation to untrusted users;
-- disable `AI_QUERY_RECORD_POST` when record querying is not required;
-- use a dedicated least-privilege permission list instead of a broad delivered
-  administrator permission list;
-- keep Integration Broker endpoints behind the organization's trusted network;
-- back up affected definitions before enabling write or build operations.
+## 凭据与报告
 
-SQL and metadata writes run with permissions available to the PeopleSoft
-application Access ID and can bypass normal component processing behavior.
+密码、PS_TOKEN、环境配置、运行日志和备份不纳入发布包或 Git；示例使用占位符。重要写入前保存原定义，失败后核对实际状态。
 
-## Credentials and reports
-
-Do not commit PeopleSoft passwords, PS tokens, environment configuration,
-compare reports, build logs, or runtime backups. Use placeholders in examples
-and local configuration outside the repository.
-
-When a GitHub repository is available, security reports should be submitted
-privately through GitHub Security Advisories rather than opened as public
-issues.
+仓库提供 GitHub Security Advisories 时，安全问题通过私密通道报告，避免在公开问题中暴露敏感信息。

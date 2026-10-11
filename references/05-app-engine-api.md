@@ -1,19 +1,14 @@
-# AI_OPER_APP_ENGINE API
+# AE 定义
+
+公共认证与响应见 [安装说明](01-auth-api.md#公共调用规则)。
 
 通过 Integration Broker REST 接口查看和操作 PeopleSoft Application Engine 定义。
 
 ## 接口地址
 
 ```
-POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_APP_ENGINE.v1/
+POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_APP_ENGINE.v1/
 ```
-
-## 请求头
-
-| Header | 值 | 必填 |
-|--------|-----|------|
-| `Content-Type` | `application/json` | 是 |
-| `PS_TOKEN` | 登录获取的 token | 是 |
 
 ## 请求体公共参数
 
@@ -34,7 +29,8 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_APP_ENGINE.v1/
 | viewSQL | 查看 Step 中 Action 绑定的 SQL 语句 |
 | modifySQL | 修改 Step 中 Action 绑定的 SQL 语句 |
 | viewPeopleCode | 查看 Step 中 PeopleCode Action 的代码 |
-| modifyPeopleCode | 修改 Step 中 PeopleCode Action 的代码 |
+| modifyPeopleCode | 修改 Step 中 PeopleCode Action 的代码；拒绝空白正文 |
+| deletePeopleCode | 删除指定 Action 的程序，保留 Section/Step/Action；定位参数同 viewPeopleCode，并需 expectedCode，可选 dryRun |
 | insertStateRecord | 插入 State Record（记录名需含有 PROCESS_INSTANCE 字段且为 Key） |
 | insertTempTable | 插入 Temp Table（记录名需含有 PROCESS_INSTANCE 字段且为 Key） |
 
@@ -205,12 +201,6 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_APP_ENGINE.v1/
 
 所有操作返回统一格式：
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `code` | int | 0=成功，非0=失败 |
-| `message` | string | 成功为 `"success"`，失败返回原因 |
-| `data` | object | 成功时包含返回数据，失败时为 `{}` |
-
 ### struct 操作返回的 data 结构
 
 | 字段 | 说明 |
@@ -218,9 +208,9 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_APP_ENGINE.v1/
 | descr | AE 的简短描述 |
 | comment | AE 的详细描述（JSON 转义） |
 | lastUpdate | 最后修改人及时间 |
-| mainSection | AE 执行的入口 Section |
+| program | AE 执行的入口 Section |
 
-### mainSection 结构
+### program 结构
 
 | 字段 | 说明 |
 |------|------|
@@ -281,7 +271,8 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_APP_ENGINE.v1/
 
 | 字段 | 说明 |
 |------|------|
-| peoplecode | PeopleCode 代码（JSON 转义）；无代码时返回空字符串 |
+| peoplecode | PeopleCode 代码（JSON 转义）；无程序时为空字符串或 null |
+| programExists | 原生程序是否存在；不表示 AE Action 是否存在 |
 | lastUpdate | 最后修改人及时间 |
 
 ---
@@ -328,3 +319,11 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/{node}/AI_OPER_APP_ENGINE.v1/
 ```
 
 > 所有代码类参数（SQL 文本、PeopleCode、comment）在传输时需经过 JSON 转义。PS_TOKEN 过期后需重新登录获取。
+
+## 删除 Action 程序
+
+```powershell
+python scripts/peoplesoft_api.py ae delete-code MY_AE --sectionid MAIN --market GBL --dbtype '' --effdt 1900-01-01 --stepid Step01 --project MY_PROJECT --dry-run
+```
+
+必须核对完整 Section 版本；本命令保留 PeopleCode Action。省略 `--dry-run` 执行删除；支持 `--output`。原生七项键与四位置 Project 复合键不同，使用 [删除流程](development-standards.md#peoplecode-真正删除)，不要直接手工登记。
