@@ -6,7 +6,7 @@
 
 ## AD 原生工程
 
-`C_META_DATA_PKG/` 的 XML/INI 由 Oracle PeopleSoft Application Designer 导出，保留原始内容以供导入，可能含 PeopleTools 生成元数据、交付对象标记和必要引用。
+`C_META_DATA_PKG/` 的 XML/INI 由 Oracle PeopleSoft Application Designer 导出，保留原生 PeopleCode 源码、编译内容和工程清单；公开包仅对环境专属 REST BaseURL 主机做占位替换，可能含 PeopleTools 生成元数据、交付对象标记和必要引用。
 
 MIT 许可证不主张 Oracle 或第三方内容的所有权，也不授予其软件使用权。持有本项目不代表获得 PeopleSoft/PeopleTools 许可证；使用和再分发须遵守适用许可及组织要求。
 

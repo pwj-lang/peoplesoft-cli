@@ -1,0 +1,146 @@
+{
+  "operation": {
+    "properties": {
+      "Servicename": "C_MY_SOAP",
+      "Defaultversion": "V1",
+      "Rtngtype": "S",
+      "Userpwdreq": "Y",
+      "RequestStatus": "N",
+      "ActiveDataGuard": 0,
+      "ThinkTime": 0,
+      "ConNav": 0,
+      "Restmethod": "",
+      "RestService": 0,
+      "RestBaseurl": "",
+      "RestOverride": 0,
+      "Ib_aliasname": "",
+      "Messagename": "",
+      "Messageversion": "",
+      "Descr": "SOAP operation verification",
+      "Descrlong": "",
+      "LanguageCd": "ZHS",
+      "ObjectOwnerId": ""
+    },
+    "collections": {}
+  },
+  "version": {
+    "properties": {
+      "Active_flag": "A",
+      "Validation": "N",
+      "Nr_flag": "N",
+      "Syncnonblock": "N",
+      "Export_flag": "N",
+      "Multi_queue": "Y",
+      "Clientimplement": "N",
+      "ExcludeToken": "N",
+      "Descr": "SOAP version verification",
+      "Descrlong": "",
+      "LanguageCd": "ZHS",
+      "ObjectOwnerId": ""
+    },
+    "collections": {
+      "Oprverdfnparm": [
+        {
+          "Parametername": "REQUEST",
+          "Messagename": "C_MY_SOAP_REQUEST",
+          "Messageversion": "V1",
+          "HTTPStatusCode": 0,
+          "ContentType": "",
+          "Queuename": "",
+          "Xfrmname": "",
+          "Outxfrmname": ""
+        },
+        {
+          "Parametername": "RESPONSE",
+          "Messagename": "C_MY_SOAP_RESPONSE",
+          "Messageversion": "V1",
+          "HTTPStatusCode": 0,
+          "ContentType": "",
+          "Queuename": "",
+          "Xfrmname": "",
+          "Outxfrmname": ""
+        }
+      ],
+      "Oprvgenrtgparm": [
+        {
+          "Parametername": "PUBSRVCSYNC",
+          "Routingdefnname": "C_MY_SOAP_ROUTE"
+        }
+      ]
+    },
+    "name": "V1"
+  },
+  "handler": {
+    "properties": {
+      "Handlerid": "RQST",
+      "Handlertype": "ApplicationClass",
+      "Active_flag": "A",
+      "Seqnumber": 0,
+      "Rollback_flag": "N",
+      "Descr": "SOAP handler verification",
+      "Descrlong": "",
+      "LanguageCd": "ZHS",
+      "ObjectOwnerId": ""
+    },
+    "collections": {
+      "Operationac": [
+        {
+          "Packageid": "MY_PACKAGE:Handlers",
+          "Packageroot": "MY_PACKAGE",
+          "Qualifypath": "Handlers",
+          "Classname": "MySoapHandler",
+          "Methodname": "OnRequest"
+        }
+      ]
+    },
+    "name": "REQUESTHDLR"
+  },
+  "routing": {
+    "properties": {
+      "Eff_status": "A",
+      "Sendernodename": "~~ANY~~",
+      "Receivernodename": "PSFT_HR",
+      "Operationname": "C_MY_SOAP",
+      "Operationversion": "V1",
+      "Rtngtype": "S",
+      "Restmethod": "",
+      "LocalIndication": 2,
+      "Generated": "N",
+      "Descr": "SOAP routing verification",
+      "Descrlong": "",
+      "LanguageCd": "ZHS",
+      "ObjectOwnerId": ""
+    },
+    "collections": {
+      "Ibrtngsubdefn": [
+        {
+          "Seqnum": 1,
+          "Direction": "I",
+          "Rtngtype": "S",
+          "Sendernodename": "~~ANY~~",
+          "Receivernodename": "PSFT_HR",
+          "Aliasname": "C_MY_SOAP.V1"
+        }
+      ],
+      "Rtngdfnparm": [
+        {
+          "Parametername": "INREQUEST",
+          "Sendernodename": "~~ANY~~",
+          "Receivernodename": "PSFT_HR",
+          "Aliasname": "C_MY_SOAP.V1",
+          "Operationversion": "V1"
+        },
+        {
+          "Parametername": "OUTRESPONSE",
+          "Sendernodename": "PSFT_HR",
+          "Receivernodename": "~~ANY~~",
+          "Aliasname": "C_MY_SOAP.V1",
+          "Operationversion": "V1"
+        }
+      ]
+    },
+    "name": "C_MY_SOAP_ROUTE",
+    "effdt": "1900-01-01"
+  },
+  "permissionList": "MY_PERMISSION"
+}

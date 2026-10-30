@@ -1,8 +1,51 @@
 # AE 定义
 
+读写分离部署：查询使用 `C_META_DATA_READ` 的对应 `AI_READ_*` URI，写入使用 `C_META_DATA_WRITE` 的原 `AI_OPER_*` URI；处理类分别位于 `C_META_DATA_PKG:MetaData:Read`、`:Write`。CLI 在 split 环境自动选择，完整映射及许可权配置见 [安装与读写分离](01-auth-api.md#读写分离2026-10-30)。下文参数/版本契约继续适用；旧混合 URI 的读取示例须改用对应 Read URI。
+
 公共认证与响应见 [安装说明](01-auth-api.md#公共调用规则)。
 
 通过 Integration Broker REST 接口查看和操作 PeopleSoft Application Engine 定义。
+
+## 原始版本与 CLI 快照（2026-10-29）
+
+所有写入均要求读取时的 `expectedVersion`，包括创建、Section/Step/Action 新增与删除、SQL/PeopleCode 修改、程序删除和 State/Temp 关联。`struct`、`viewSQL`、`viewPeopleCode` 返回 `version`（`ae1:` 前缀）和 `aeVersionControl=1`。不存在的 AE 也先 `struct` 后创建；缺版本返回 428，旧版本返回 409。
+
+版本涵盖 AE 属性、语言、全部 Section 版本、Step、Action、消息参数、State/Temp 关联及绑定的 SQL/PeopleCode 原生版本。服务端在 AEM/AES/PCM/SRM 锁内比较与保存，内部写方法不再提前提交；失败回滚，读取期间变化返回 409。此机制保护数据库已保存定义，不包含 AD 内存草稿，也不提供历史版本库或自动回滚。
+
+CLI 结构快照绑定环境、服务器、节点、账号和 AE；代码/SQL 快照再绑定 Section、Market、DBType、EffDt、Step，SQL 还绑定 Action。`modify-code` / `modify-sql` 使用输入文件旁的 `.snapshot.json`，也可显式 `--snapshot`；`delete-code` 使用对应代码快照。409 另存最新结构，保留原稿及原快照，不自动取新版本重试。写后独立回读并登记完整工程键；登记失败只补登记。
+
+```powershell
+python scripts/peoplesoft_api.py ae struct MY_AE --json
+python scripts/peoplesoft_api.py ae view-code MY_AE --sectionid WORK --stepid First --output D:\work\original-code.json
+python scripts/peoplesoft_api.py ae modify-code MY_AE --sectionid WORK --stepid First --file D:\work\edited.pcode --snapshot D:\work\original-code.json --project MY_PROJECT
+python scripts/peoplesoft_api.py ae view-sql MY_AE --sectionid WORK --stepid First --actiontype S --json
+```
+
+`view-code` / `view-sql` 输出正文缓存与快照路径。结构写入使用前次 `struct` 快照，成功后刷新结构快照；正文编辑须重新读取正文快照。旧客户端不能绕过服务端版本要求，须同时部署新版 CLI 和原生编译工程。下文直接 API 的写入示例均须补充原始 `expectedVersion`。
+
+## 删除 Section、Step、Action
+
+| CLI / operationType | 精确范围 |
+|---|---|
+| `delete-section` / `deleteSection` | `sectionId + market + dbType + effdt` 的一个版本，级联其 Step/Action；最后一个版本才移除 Section 头；拒绝 MAIN 和仍被其他静态 Call Section 引用的 Section |
+| `delete-step` / `deleteStep` | 上述完整版本加 `stepId`，级联其 Action；保留相邻 Step 和其他版本 |
+| `delete-action` / `deleteAction` | 上述完整键再加 `actionType`；支持 S/P/M/W/C/H/N/X/D，保留父 Step 和其他 Action |
+
+三个命令都使用结构快照，支持 `--dry-run`、`--snapshot`、`--output`、`--json` 和 `--project`。Market 默认 GBL、DBType 默认空、EffDt 默认 1900-01-01；其他版本应显式指定。`delete-section` 不接受 Step/Action 参数，`delete-step` 不接受 Action 参数，防止误扩大删除范围。不存在目标返回错误，不当作成功。
+
+```powershell
+python scripts/peoplesoft_api.py ae struct MY_AE --output D:\work\original-ae.json
+python scripts/peoplesoft_api.py ae delete-action MY_AE --sectionid WORK --stepid First --actiontype P --snapshot D:\work\original-ae.json --project MY_PROJECT --dry-run
+python scripts/peoplesoft_api.py ae delete-action MY_AE --sectionid WORK --stepid First --actiontype P --snapshot D:\work\original-ae.json --project MY_PROJECT
+python scripts/peoplesoft_api.py ae delete-step MY_AE --sectionid WORK --stepid Other --project MY_PROJECT
+python scripts/peoplesoft_api.py ae delete-section MY_AE --sectionid WORK --market GBL --dbtype 2 --effdt 2026-01-01 --project MY_PROJECT
+```
+
+删除 PeopleCode Action 时原生删除其程序；仅删程序、保留 Action 仍用 `delete-code`。SQL Action 删除仅清理其精确 Market/DBType/EffDt SQL 段，保留仍被其他 Action 引用的段；末段移除后原生删除 SQL 定义。Log Message 清理消息参数及 Step 消息属性；Call Section 清除调用属性；不删除共享消息或被调用的 AE。空 Step 可以保留，之后可继续添加 Action。
+
+响应 `projectItems` 包含完整四位置 ID/Value 和 `deleted`：父 AE（33）Copy；存续 Section（34）Copy、末版本删除后 Delete；移除的程序（43）Delete；SQL（30，子类型1）按定义是否存续选择 Copy/Delete。均设 Upgrade=on、Done=off。dry-run 仅返回计划，不修改定义、版本或工程；不能证明实际删除成功。
+
+`struct.sections` 列出全部 Section，含未被 MAIN 调用的分支；原 `program` 继续保留 MAIN。Call Section 的嵌套展示最多八层，完整本地结构以 `sections` 为准。整份 AE 删除没有新增 CLI 命令；动态业务引用及其他环境迁移须按实际使用独立核验。
 
 ## 接口地址
 
@@ -16,6 +59,7 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_APP_ENGINE.v1/
 |------|------|------|------|
 | aeId | string | **是** | Application Engine 的唯一标识 |
 | operationType | string | **否** | 操作类型，默认为 `struct` |
+| expectedVersion | string | 写入必填 | 前次读取的原始 version；包括 dryRun |
 
 ## operationType 参数说明
 
@@ -31,6 +75,9 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_APP_ENGINE.v1/
 | viewPeopleCode | 查看 Step 中 PeopleCode Action 的代码 |
 | modifyPeopleCode | 修改 Step 中 PeopleCode Action 的代码；拒绝空白正文 |
 | deletePeopleCode | 删除指定 Action 的程序，保留 Section/Step/Action；定位参数同 viewPeopleCode，并需 expectedCode，可选 dryRun |
+| deleteSection | 删除精确 Section 版本及其 Step/Action；见上方删除契约 |
+| deleteStep | 删除精确 Step 及其 Action |
+| deleteAction | 删除精确 Action 和所属程序/SQL 段/消息参数 |
 | insertStateRecord | 插入 State Record（记录名需含有 PROCESS_INSTANCE 字段且为 Key） |
 | insertTempTable | 插入 Temp Table（记录名需含有 PROCESS_INSTANCE 字段且为 Key） |
 
@@ -178,7 +225,7 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_APP_ENGINE.v1/
 插入前校验：
 
 - 记录在 PSRECDEFN 中存在（RECTYPE=0）
-- 记录有 PROCESS_INSTANCE 字段且该字段是 Key（PSRECFIELD.KEYCOUNT > 0）
+- 记录有 PROCESS_INSTANCE 字段且该字段是 Key（PSRECFIELD.USEEDIT 的 Key 位）
 - 该 State Record 未在 PSAEAPPLSTATE 中已存在
 
 ### 11. insertTempTable — 插入 Temp Table
@@ -189,8 +236,8 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_APP_ENGINE.v1/
 
 插入前校验：
 
-- 记录在 PSRECDEFN 中存在（RECTYPE=0）
-- 记录有 PROCESS_INSTANCE 字段且该字段是 Key（PSRECFIELD.KEYCOUNT > 0）
+- 记录在 PSRECDEFN 中存在且为真实 Temp Table（RECTYPE=7）
+- 记录有 PROCESS_INSTANCE 字段且该字段是 Key（PSRECFIELD.USEEDIT 的 Key 位）
 - 该 Temp Table 未在 PSAEAPPLTEMPTBL 中已存在
 
 > Temp Table 的实例数（TEMPTBLINSTANCES）属于 AE 级属性，新增 Temp Table 时不需传此参数。

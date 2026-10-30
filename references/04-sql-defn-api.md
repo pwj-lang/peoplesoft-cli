@@ -1,6 +1,29 @@
 # SQL 定义
 
+读写分离部署：查询使用 `C_META_DATA_READ` 的对应 `AI_READ_*` URI，写入使用 `C_META_DATA_WRITE` 的原 `AI_OPER_*` URI；处理类分别位于 `C_META_DATA_PKG:MetaData:Read`、`:Write`。CLI 在 split 环境自动选择，完整映射及许可权配置见 [安装与读写分离](01-auth-api.md#读写分离2026-10-30)。下文参数/版本契约继续适用；旧混合 URI 的读取示例须改用对应 Read URI。
+
 通过 Integration Broker REST 接口查看、创建和修改 PeopleSoft SQL 定义。
+
+## 原始版本与冲突处理（2026-10-29）
+
+SQLType=0 的 create、modify 必须携带原始 `expectedVersion`。view 对已存在和不存在名称都返回 `exists`、`version`（`sql1:` 前缀）和 `sqlVersionControl=1`；创建前也先读取不存在名称。版本覆盖定义头、所有 Market/DBType/EffDt/SeqNum 正文段、描述、翻译、哈希和删除标记。SRM 与父行锁内比较并保存；缺少/空版本返回428，旧版本返回409，失败回滚。读取过程中发生修改也返回409，需重新读取。
+
+CLI 保存完整结构快照，下载的每个 `.sql` 旁保存 `.snapshot.json`，绑定环境、服务器、节点、账号、SQL 名称和精确 Statement 键。带正文文件修改时默认使用该文件旁的快照；显式 `--snapshot` 可选先前结构或对应正文快照。缺快照拒绝写入，不能使用保存前的新读取替换基线。409 时另存最新结构及正文，保留原稿和原快照且不自动重试。
+
+```powershell
+# 读取不存在名称后创建；statement.json 仅含 statements 业务数组
+python scripts/peoplesoft_api.py sql view MY_SQL --output original.json
+python scripts/peoplesoft_api.py sql create MY_SQL statement.json --snapshot original.json
+# 已存在定义：使用 view 输出的正文文件及其 sidecar
+python scripts/peoplesoft_api.py sql view MY_SQL
+python scripts/peoplesoft_api.py sql modify MY_SQL --sqltext-file <下载的.sql> --market GBL --dbtype DEFAULT --effdt 1900-01-01
+```
+
+`--descr` 修改目标 Statement 描述，`--comment-file` 修改注释。创建和修改成功后独立回读完整 Statement 集合、正文及描述，原快照不自动推进；下一次编辑重新读取。`--dry-run` 在原生保存校验后回滚，不登记工程；此参数仅适用于定义维护，sql exec/run/write 会拒绝，不能用于数据执行。SQL 定义命令沿用手工 `project insert-item` 登记方式，先读取 Project 原始快照。
+
+直接请求的示例需在 create/modify 中增加 `"expectedVersion":"<view 返回的原始 version>"`；可传 `dryRun:true`。成功写响应增加 `beforeVersion`、`version`、`sqlVersionControl`、`dryRun`。dry-run 响应的 version 描述回滚前的拟保存状态，不能作为后续写入基线。版本控制用于并发覆盖检测，不提供历史版本库。需配套新版编译后的 OperSqlDefn、Utility:DefinitionVersion 与 `scripts/sql_project_operations.py`；REST URI及权限不变。
+
+执行数据查询使用 [sql exec/run](10-sql-exec-api.md)，单条 DML 使用单独授权的 sql write。本接口维护 SQL 定义，不授予数据执行权限；sql run 首期只读，按当前数据库与 as-of date 原生选择正文后校验。
 
 ## 接口地址
 
@@ -14,6 +37,8 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_SQL_DEFN.v1/
 |------|------|------|------|
 | `sqlId` | string | **是** | SQL 对象的唯一标识。可通过 SearchDefinition（definitionType=65）获取 |
 | `operationType` | string | 否 | 操作类型，默认为 `"view"`。可选值：`"view"`、`"create"`、`"modify"` |
+| `expectedVersion` | string | 写入必填 | 先前 view 的原始 version；创建使用不存在状态的令牌 |
+| `dryRun` | boolean | 否 | 默认false；定义写入执行校验后回滚 |
 
 > 注意：此接口目前仅支持 SQL 类型 0（普通手工创建的 SQL 对象）。sqlType 由后端硬编码，不需要传。
 
@@ -54,7 +79,7 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_SQL_DEFN.v1/
 | `lastUpdate` | string | 最后更新信息 |
 | `statements` | array | Statement 行数组 |
 | `statements[].market` | string | 市场（如 "GBL"） |
-| `statements[].dbType` | string | 元数据字符码（默认 32；Oracle 专用 50；其余 49~55） |
+| `statements[].dbType` | number | 元数据字符码（默认 32；Oracle 专用 50；其余 49~55） |
 | `statements[].effdt` | string | 生效日期 |
 | `statements[].sqlText` | string | SQL 文本（JSON 转义） |
 | `statements[].descr` | string | 描述 |

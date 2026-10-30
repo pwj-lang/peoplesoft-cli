@@ -3,71 +3,74 @@ name: ps-cli
 description: "用 CLI 查询、创建和修改 PeopleSoft 定义；用于 PeopleCode、Application Designer 开发与排障"
 license: "原创内容采用 MIT；适用范围见 LICENSE 和 NOTICE.md"
 metadata:
-  version: 1.5.0
+  version: 2.0.0-rc.1
   tags: [ps, peoplesoft, peoplecode, app-designer]
 ---
 
 # PeopleSoft CLI
 
-通过 Integration Broker REST API 维护 Record、Field、Page、Component、Project、应用包、SQL、AE，以及服务、服务操作、菜单、消息目录和门户。
+通过 Integration Broker REST API 查询和维护 PeopleSoft 定义、PeopleCode、工程及服务配置；支持业务数据/SQL 查询，SQL DML 单独授权。当前候选发行版为 **2.0.0-rc.1**；最新稳定版为 1.5.0。候选版适用于受控开发/测试，尚有下述明确限制。
 
-**开发前必读 [开发规范](references/development-standards.md)**，再按对象读取接口文档。当前限制见 [已知问题](references/known-code-issues.md)。
+实际开发或审查前读取 [开发规范](references/development-standards.md)，再按下表读取相关对象文档。部署、依赖和工具维护先读 [架构与交付边界](references/architecture.md)。
 
-## 1. 确认环境
+## 确认环境和工作工程
 
 以下命令在本 skill 目录执行；从其他目录调用时使用脚本绝对路径。
 
 ```powershell
 python scripts/peoplesoft_api.py env list
 python scripts/peoplesoft_api.py env current
-python scripts/peoplesoft_api.py env use <环境名>
+python scripts/peoplesoft_api.py project current
 python scripts/peoplesoft_api.py preflight --refresh
 ```
 
-使用用户已指定的环境；显示环境名和用户名，隐藏密码及 Token。配置默认位于 `%USERPROFILE%\.peoplesoft\config.json`，可通过 `PEOPLESOFT_CONFIG` 覆盖。IB 节点默认 `PSFT_HR`，可用环境配置的 `node` 或 `PEOPLESOFT_NODE` 覆盖。
+沿用用户指定的环境和已确认的 Project；`active_project` 只是上次选择，没有明确归属的写任务再确认。只读不登记工程。配置默认在 `%USERPROFILE%\.peoplesoft\config.json`，支持 `PEOPLESOFT_CONFIG`；节点默认 `PSFT_HR`，支持环境 `node` / `PEOPLESOFT_NODE`。显示环境名和用户名，隐藏密码和 Token。
 
-根据 preflight 的报错和 NEXT 处理：路由缺失查部署，401/403 或明确未授权查权限，180/74“找不到类”查 Handler 与包依赖，连接或认证失败查环境。流程见 [安装、认证与授权](references/01-auth-api.md)。完成安装后运行 `healthcheck --refresh`；PSTOKEN_GET 与全部 15 个元数据操作均通过才报告环境就绪。查询探测默认 `JOB.EMPLID`，替换字段时使用索引字段，避免全表扫描。
+- 路由缺失查部署；401/403 或明确未授权查权限；180/74“找不到类”查 Handler 和包依赖；连接/认证失败查环境。按 preflight 的 NEXT 处理。
+- 安装完成后运行 `healthcheck --refresh`；认证及 20 个必需读取操作通过才报告基本安装就绪。它不证明写权限可用。查询探测默认 `JOB.EMPLID`，替换时选择索引字段。
+- 已迁移环境使用 `env layout split`；未迁移环境保留 legacy。权限、部署或网络失败时不自动回退。SQL 写操作需先 Build 审计表和唯一索引、单独授权，再用 `--include-sql-write` 验证。详见 [安装与授权](references/01-auth-api.md)。
 
-## 2. 确认工作 Project
+## 读取、修改和验证
 
-```powershell
-python scripts/peoplesoft_api.py project current
-python scripts/peoplesoft_api.py project struct <项目名>
-python scripts/peoplesoft_api.py project use <项目名>
-```
+1. 先读结构/正文，保存原始 `version` 快照；创建前也读取不存在名称。所有已开放的定义写入使用原始 `expectedVersion`，不能在保存前刷新基线掩盖冲突。
+2. 正文和复杂补丁保存为 UTF-8 文件，通过 `--file` 等参数提交。`view-code` / `view-sql` 会下载工作副本和适用的 `.snapshot.json`；缓存不代替服务器当前状态。具体编码按对象文档，不能统一套 Base64。
+3. 缺版本 428、冲突 409 时保留改稿及原快照，不自动换版本重试。结果不明先回读实际状态；保存、回读和工程登记分开报告，不能把部分成功当作整体回滚。
+4. 成功后独立回读；写入按返回的完整键登记已确认的工程，已有成员也恢复 Unknown / Copy / Upgrade on / Done off。明确删除使用相应 Delete 键；自动登记范围见 [Project](references/11-oper-project-defn-api.md)。
 
-沿用用户已确认的 Project；没有明确归属时再确认。`active_project` 按环境保存，只是上次选择。只读不登记；写入后核对完整条目，缺失才插入。Action、Upgrade、Done 的作用和命令见 [Project 管理](references/11-oper-project-defn-api.md)。
-
-## 3. 执行并验证
-
-先读现状，再提交所需修改，最后独立回读。PeopleCode、SQL 和复杂补丁优先存为 UTF-8 文件，再通过 `--file` 等参数提交；编码由 CLI 处理。结果不明时先查当前状态，不盲目重试写请求。modify-code 拒绝空白正文；真正删除程序使用 delete-code，核对原生 programExists 和 Project Delete 标记，见 [删除流程](references/development-standards.md#peoplecode-真正删除)。
+`modify-code` 拒绝空白正文；删除程序使用 `delete-code`，删除类/包、Label、字段、AE 子对象或整份定义使用各自明确命令。先核对删除范围和快照，可用时先 `--dry-run`；真正删除须验证原生不存在及工程标记。Service / Service Operation 配置使用 `plan-configure`，整套操作删除及空 Service 删除使用 `plan-delete` 的完整原始计划。
 
 ```powershell
 python scripts/peoplesoft_api.py search field EMPLID
 python scripts/peoplesoft_api.py record struct MY_RECORD
 python scripts/peoplesoft_api.py component struct JOB_DATA --deep
-python scripts/peoplesoft_api.py page struct MY_PAGE --full --json
-python scripts/peoplesoft_api.py project update-item MY_PROJECT --object-type 0 --value1 MY_RECORD --action Copy --upgrade on --done off
+python scripts/peoplesoft_api.py project struct MY_PROJECT
 ```
 
-`view-code` / `view-sql` 自动缓存 UTF-8 工作副本，并输出路径；缓存不能代替服务器回读。参数详情使用 `<命令> --help`。
+参数以 `<命令> --help` 为准。对象限制和迁移语义必须读取对应参考，不把某类对象的删除或版本行为推广到其他对象。
 
-## 按需参考
+维护工具部署工程 `C_META_DATA_PKG` 时只登记接口及实际运行依赖。电子表格、演示/探针、测试删除键和非运行兼容类留在各自工程；共用 JavaReflect 不意味着所有调用者都应进入核心工程。仅引用且未修改的系统标准 Field 不单独登记；Record 上的 Key/Required 等设置属于 Record，不是全局 Field 修改。消息翻译复用系统 `MESSAGE_CATALOG1` / `MESSAGE_CATALOG_CI`，不重新引入已退役的自建组件。
 
-| 任务 | 文档 |
+## 按任务读取
+
+| 任务 | 参考 |
 |---|---|
-| 安装、认证、授权、原生导入导出 | [01-auth-api.md](references/01-auth-api.md) |
-| 搜索定义 | [02-search-defn-api.md](references/02-search-defn-api.md) |
-| 应用包与类代码 | [03-app-pkg-api.md](references/03-app-pkg-api.md) |
-| SQL 定义 | [04-sql-defn-api.md](references/04-sql-defn-api.md) |
-| AE | [05-app-engine-api.md](references/05-app-engine-api.md) |
-| Record、Field、Build | [06-record-defn-api.md](references/06-record-defn-api.md) |
-| Page、Component 与页面结构 | [07-page-defn-api.md](references/07-page-defn-api.md) |
-| 业务数据查询 | [09-query-record-api.md](references/09-query-record-api.md) |
-| Project、迁移标记与完整键 | [11-oper-project-defn-api.md](references/11-oper-project-defn-api.md) |
-| REST 服务、操作、版本、Handler、Routing、授权 | [12-service-defn-api.md](references/12-service-defn-api.md) |
-| 菜单与 ItemSelected | [14-menu-defn-api.md](references/14-menu-defn-api.md) |
-| 消息目录 | [15-message-catalog-api.md](references/15-message-catalog-api.md) |
-| 门户文件夹、CREF、Link、属性与权限 | [16-portal-registry-api.md](references/16-portal-registry-api.md) |
+| 安装、认证、读写权限、原生导入导出 | [安装与授权](references/01-auth-api.md) |
+| 维护工具、理解入口和公共依赖 | [架构与交付边界](references/architecture.md) |
+| 搜索定义 | [搜索](references/02-search-defn-api.md) |
+| 应用包、类与类代码 | [应用包](references/03-app-pkg-api.md) |
+| SQL 定义与正文 | [SQL](references/04-sql-defn-api.md) |
+| AE、Section、Step、Action | [AE](references/05-app-engine-api.md) |
+| Field、Label、Record、Build | [Record / Field](references/06-record-defn-api.md) |
+| Page、控件、Component 属性及代码 | [Page / Component](references/07-page-defn-api.md) |
+| 业务数据查询 | [Query Record](references/09-query-record-api.md) |
+| SQL 查询、DML、审计和独立权限 | [SQL 执行](references/10-sql-exec-api.md) |
+| Project、完整键和迁移标记 | [Project](references/11-oper-project-defn-api.md) |
+| Service、Operation、Handler、Routing、WSDL | [服务](references/12-service-defn-api.md) |
+| Menu、栏/项目与 ItemSelected | [Menu](references/14-menu-defn-api.md) |
+| 消息目录、独立翻译 | [消息目录](references/15-message-catalog-api.md) |
+| 门户 Folder、CREF、Link、权限 | [Portal](references/16-portal-registry-api.md) |
+| CI / Methods、HTML、自由格式 StyleSheet | [CI / HTML / StyleSheet](references/17-ci-html-stylesheet-api.md) |
+| 未解决问题、未验收和延期范围 | [已知问题](references/known-code-issues.md) |
+| 版本、分批交付与发行条件 | [发布规划](references/release-roadmap.md) |
 
-维护工具本身时再读 [发布规划](references/release-roadmap.md)。本包版本为 1.5.0，基于 rc.2 完成第二轮独立复验；后续目标为 2.0.0。旧 2.x 为未公开的历史内部编号。日常编辑不升版，形成新验收包时才递增 dev/rc 后缀。
+服务端已在 panwx25 / Oracle / PeopleTools 8.60.10 验证；旧版本须重新编译及实机验收。Page 属性按已有证据每批 10–20 项交付，Fluid 暂缓；SOAP Validation=Y 间歇性 119,40 未关闭；CI 引用和 CI 多语言子结构后置。不要据旧验收记录或同名历史 zip 宣布当前全部范围完成。

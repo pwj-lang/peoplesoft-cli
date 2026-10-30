@@ -1,12 +1,14 @@
 # 业务数据查询
 
-通过 Integration Broker REST 查询业务数据。处理类：`C_META_DATA_PKG:RecordQuery:OperQueryRecord`。Operation 名为 `AI_QUERY_RECORD_POST`，实际 URI 去掉 `_POST`：
+通过 Integration Broker REST 查询业务数据。处理类：`C_META_DATA_PKG:MetaData:Read:OperQueryRecord`。Operation 名为 `AI_QUERY_RECORD_POST`，实际 URI 去掉 `_POST`：
 
 ```text
 POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_QUERY_RECORD.v1/
 ```
 
 认证和公共响应见 [安装说明](01-auth-api.md#公共调用规则)。本实现仅在 PANWX25 / Oracle / PeopleTools 8.60.10 验收。
+
+常规按 Record/Field 查询优先使用本接口的元数据校验；需要 JOIN、表达式或已登记 SQL 定义时使用 [SQL 执行](10-sql-exec-api.md)。两者均不提供业务组件行级安全，SQL 执行权限另行授予。
 
 ## 请求参数
 

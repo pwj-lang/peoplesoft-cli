@@ -211,16 +211,17 @@ class PSAuthError(RuntimeError):
 
 
 class PSAPIError(RuntimeError):
-    """接口调用无法完成（非 JSON 响应、网络失败等）。
+    """接口调用失败（应用错误、非 JSON 响应、网络失败等）。
 
     与 PSAuthError 一样保留服务端响应原文，让 Agent 能按 SKILL.md 的环境检查的
     故障分流表识别「Routing 缺失」「未经授权」等原因，而不是拿到一句裸 traceback。
     """
 
-    def __init__(self, detail, hint=""):
+    def __init__(self, detail, hint="", code=None):
         super().__init__(detail)
         self.detail = detail
         self.hint = hint
+        self.code = code
 
 
 def _ib_failure_reason(text):
@@ -428,6 +429,8 @@ def _urlopen(req):
 
 def _api_call(endpoint, data=None):
     """通用 API 调用，自动带 PS_TOKEN，返回解析后的 data 字段。token 过期自动刷新一次。"""
+    from metadata_routing import resolve
+    endpoint = resolve(endpoint, data, _cfg.get("metadata_api_layout", "legacy"))
     def do_call(tok):
         """发一次请求并返回响应原文；HTTP 错误页也取原文，供上层判断。"""
         body = json.dumps(data).encode() if data else None
@@ -474,9 +477,11 @@ def _api_call(endpoint, data=None):
         # Only retry reads or explicit authentication failures. A malformed
         # mutation response can follow a committed save; resubmitting duplicates it.
         read_actions = {"view", "struct", "structDeep", "default", "exists",
-                        "viewPeopleCode", "viewCode", "viewSQL", "list", "search"}
+                        "viewPeopleCode", "viewCode", "viewSQL", "list", "search", "wsdl"}
         action = data.get("operationType") if isinstance(data, dict) else None
-        is_read = endpoint.startswith(("AI_SEARCH_DEFN.", "AI_QUERY_RECORD.", "AI_OPER_FIELD_DEFN.")) or action in read_actions
+        field_query = endpoint.startswith("AI_OPER_FIELD_DEFN.") and (
+            isinstance(data, list) or action in (None, "", "query", "struct"))
+        is_read = field_query or endpoint.startswith(("AI_READ_", "AI_SEARCH_DEFN.", "AI_QUERY_RECORD.", "AI_EXEC_SQL.")) or action in read_actions
         if "psft authentication token failed" in raw.lower():
             raw = do_call(get_token(force_refresh=True))
             resp = parse(raw)
@@ -489,8 +494,7 @@ def _api_call(endpoint, data=None):
             fail(raw)
 
     if resp.get("code") != 0:
-        print(f"API Error [{resp.get('code')}]: {resp.get('message')}", file=sys.stderr)
-        sys.exit(1)
+        raise PSAPIError(f"API Error [{resp.get('code')}]: {resp.get('message')}", code=resp.get("code"))
     return resp.get("data", {})
 
 def json_escape(text):
@@ -514,9 +518,9 @@ def _normalize_dbtype(value):
 
 def _peoplecode_signature(code):
     """Ignore compiler formatting and comments while preserving string literals."""
-    tokens = re.findall(r'"(?:[^"]|"")*"|/\*[\s\S]*?\*/|\bREM\b[^;]*;|\s+|.', code or "", re.I)
+    tokens = re.findall(r'"(?:[^"]|"")*"|/\*[\s\S]*?\*/|/\+[\s\S]*?\+/|\bREM\b[^;]*;|\s+|.', code or "", re.I)
     return "".join(t if t.startswith('"') else t.casefold()
-                   for t in tokens if not t.isspace() and not t.startswith("/*")
+                 for t in tokens if not t.isspace() and not t.startswith(("/*", "/+"))
                    and not re.match(r"^REM\b", t, re.I))
 
 
@@ -539,7 +543,7 @@ def _delete_verified_peoplecode(endpoint, payload, args):
     if not project:
         raise PSAPIError("delete-code requires --project or an active Project.")
     project_payload = {"projectName": project, "operationType": "struct"}
-    _api_call("AI_OPER_PROJECT_DEFN.v1/", project_payload)
+    _require_project(project)
     view = dict(payload, operationType="viewPeopleCode")
     before = _api_call(endpoint, view)
     if before.get("programExists") is not True:
@@ -555,7 +559,10 @@ def _delete_verified_peoplecode(endpoint, payload, args):
         raise PSAPIError("Deletion response lacks the complete Project key; inspect program and Project state.")
     if result.get("dryRun") is not dry or result.get("deleted") is not (not dry) or result.get("programExists") is not dry:
         raise PSAPIError("Server did not confirm the requested native deletion state; inspect before retrying.")
-    actual = _api_call(endpoint, view)
+    try:
+        actual = _api_call(endpoint, view)
+    except PSAPIError as exc:
+        raise PSAPIError("Server acknowledged the deletion request, but independent readback failed; inspect current state before retrying.", hint=str(exc)) from exc
     if actual.get("programExists") is not dry:
         raise PSAPIError("Independent native PeopleCode existence readback differs.")
     if dry:
@@ -563,21 +570,10 @@ def _delete_verified_peoplecode(endpoint, payload, args):
             raise PSAPIError("PeopleCode changed during dry-run; read the latest source.")
     else:
         try:
-            def matches():
-                rows = _api_call("AI_OPER_PROJECT_DEFN.v1/", project_payload).get("items", [])
-                return [r for r in rows if _project_item_key(r) == _project_item_key(item)]
-            rows = matches()
-            if not rows:
-                _api_call("AI_OPER_PROJECT_DEFN.v1/", dict(item, projectName=project, operationType="insertItem", upgradeAction=1, takeAction=1))
-                rows = matches()
-            if len(rows) != 1:
-                raise PSAPIError("Expected one exact Project deletion item.")
-            flags = {"upgradeAction": 1, "takeAction": 1, "copyDone": 0}
-            if any(rows[0].get(k) != v for k, v in flags.items()):
-                _api_call("AI_OPER_PROJECT_DEFN.v1/", dict(item, projectName=project, operationType="updateItem", **flags))
-            rows = matches()
-            if len(rows) != 1 or any(rows[0].get(k) != v for k, v in flags.items()):
-                raise PSAPIError("Project deletion flags did not match after readback.")
+            _, member = _insert_project_item(project, item['objectType'],
+                [item[f'objectValue{i}'] for i in range(1, 5)], action=1)
+            if _project_item_key(member) != _project_item_key(item):
+                raise PSAPIError('Project deletion key differs after registration.')
         except (PSAPIError, SystemExit) as exc:
             raise PSAPIError("Native program deletion succeeded, but Project registration failed; inspect the saved key before retrying.") from exc
     result.update(environment=ENVIRONMENT, project=project, snapshotPath=str(snapshot), readbackVerified=True)
@@ -614,6 +610,8 @@ def cmd_auth(args):
 # ── healthcheck ───────────────────────────────────────
 def _probe_api(endpoint, payload):
     """Call a read-only endpoint and classify access without printing response data."""
+    from metadata_routing import resolve
+    endpoint = resolve(endpoint, payload, _cfg.get("metadata_api_layout", "legacy"))
     try:
         token = get_token()
         body = json.dumps(payload).encode()
@@ -646,6 +644,8 @@ def _probe_api(endpoint, payload):
     lowered = detail.lower()
     if code == 0:
         return True, "reachable"
+    if endpoint == "AI_EXEC_SQL_WRITE.v1/" and code == 400 and "sql" in message.lower() and "nonblank" in message.lower():
+        return True, "reachable (empty SQL rejected; no DML executed)"
     if any(term in lowered for term in (
         "not authorized", "not authorised", "access denied", "permission",
         "forbidden", "authentication", "psft authentication token failed",
@@ -672,13 +672,13 @@ PROBE_TIMEOUT = 60
 def _build_probes(package_root="C_META_DATA_PKG", record="JOB", component="JOB_DATA",
                   page="JOB_DATA1", field="EMPLID", query_record="JOB",
                   query_field="EMPLID", ae_id=PROBE_VALUE,
-                  sql_id=PROBE_VALUE, project="C_META_DATA_PKG"):
-    """15 个 Service Operation 的只读探测清单。healthcheck 与 preflight 共用。
+                  sql_id=PROBE_VALUE, project="C_META_DATA_PKG", include_sql_write=False):
+    """20 个必需操作，写执行操作可选探测。所有探测均无数据写入。
 
     ae_id / sql_id 故意用不存在的名字：服务端回「找不到定义」恰好证明请求被到达
     且已放行，同时不会改动任何元数据。
     """
-    return (
+    probes = (
         ("AI_SEARCH_DEFN_POST", "AI_SEARCH_DEFN.v1/", {
             "definitionType": 104, "definitionName": package_root,
         }),
@@ -725,7 +725,23 @@ def _build_probes(package_root="C_META_DATA_PKG", record="JOB", component="JOB_D
         ("AI_OPER_PORTAL_REGISTRY_POST", "AI_OPER_PORTAL_REGISTRY.v1/", {
             "kind": "portal", "operationType": "exists", "name": PROBE_VALUE,
             "PortalName": "EMPLOYEE", "RefType": "F"}),
+        ("AI_EXEC_SQL_POST", "AI_EXEC_SQL.v1/", {"sql": "SELECT 1 FROM DUAL", "maxRows": 1}),
+        ("AI_OPER_HTML_DEFN_POST", "AI_OPER_HTML_DEFN.v1/", {
+            "kind": "html", "operationType": "exists", "name": PROBE_VALUE}),
+        ("AI_OPER_STYLESHEET_DEFN_POST", "AI_OPER_STYLESHEET_DEFN.v1/", {
+            "kind": "stylesheet", "operationType": "exists", "name": PROBE_VALUE}),
+        ("AI_OPER_CI_DEFN_POST", "AI_OPER_CI_DEFN.v1/", {
+            "kind": "ci", "operationType": "exists", "name": PROBE_VALUE}),
+        ("AI_LIST_DEFN_POST", "AI_LIST_DEFN.v1/", {"kind": "html", "prefix": "C_AI_NO_MATCH_", "limit": 1}),
     )
+    if include_sql_write:
+        probes += (("AI_EXEC_SQL_WRITE_POST", "AI_EXEC_SQL_WRITE.v1/", {"sql": ""}),)
+    if _cfg.get("metadata_api_layout", "legacy") == "split":
+        from metadata_routing import resolve
+        probes = tuple(("AI_READ_" + operation[len("AI_OPER_"):] if operation.startswith("AI_OPER_") else operation,
+                        resolve(endpoint, payload, "split"), payload)
+                       for operation, endpoint, payload in probes)
+    return probes
 
 
 def cmd_preflight(args):
@@ -813,6 +829,7 @@ def cmd_healthcheck(args):
         ae_id=args.ae_id,
         sql_id=args.sql_id,
         project=args.project,
+        include_sql_write=args.include_sql_write,
     )
     print(f"Health check: environment={ENVIRONMENT} pia={BASE_URL} user={USERNAME}")
     failures = []
@@ -839,7 +856,7 @@ def cmd_healthcheck(args):
     if failures:
         print("Health check failed: " + ", ".join(failures), file=sys.stderr)
         sys.exit(1)
-    print(f"Health check passed: PSTOKEN_GET plus all {len(probes)} ps-metadata operations.")
+    print(f"Health check passed: PSTOKEN_GET plus all {len(probes)} operations.")
 
 
 # ── environment ───────────────────────────────────────
@@ -1007,6 +1024,23 @@ def cmd_env(args):
         _print_environment(active, environments[active], active)
         return
 
+    if args.op == "layout":
+        if not args.name:
+            print(f"{active}: metadata_api_layout={environments[active].get('metadata_api_layout', 'legacy')}")
+            return
+        if args.name not in ("legacy", "split"):
+            print("ERROR: env layout requires legacy or split", file=sys.stderr)
+            sys.exit(2)
+        if not is_multi_env:
+            doc = {k: v for k, v in doc.items() if k != "peoplesoft"}
+            doc["environments"] = environments
+            doc["active_environment"] = active
+        environments[active]["metadata_api_layout"] = args.name
+        _write_config(doc)
+        _reload_runtime()
+        print(f"{active}: metadata_api_layout={args.name}")
+        return
+
     if not args.name:
         print("ERROR: env use requires an environment name", file=sys.stderr)
         sys.exit(2)
@@ -1069,318 +1103,35 @@ def cmd_search(args):
 
 # ── app-pkg ───────────────────────────────────────────
 def cmd_app_pkg(args):
-    payload = {"packageRoot": args.pkg}
-    if args.op == "delete-code":
-        parts = (args.classpath or "").split(":")
-        if not 2 <= len(parts) <= 4 or parts[0] != args.pkg or any(not p for p in parts):
-            raise PSAPIError("delete-code requires a complete class path under the given package root.")
-        return _delete_verified_peoplecode("AI_OPER_APP_PKG_POST.v1/", dict(payload, classPath=args.classpath), args)
-    if args.op == "struct":
-        payload["operationType"] = "default"
-        data = _api_call("AI_OPER_APP_PKG_POST.v1/", payload)
-        _print_pkg_tree(data.get("packageTree", {}), indent=0)
-        if data.get("comment"):
-            print(f"\ndescr: {data.get('descr', '')}")
-            print(f"lastUpdate: {data.get('lastUpdate', '')}")
-    elif args.op == "view-code":
-        payload["operationType"] = "viewPeopleCode"
-        payload["classPath"] = args.classpath
-        data = _api_call("AI_OPER_APP_PKG_POST.v1/", payload)
-        code = data.get("peoplecode", "")
-        print(code)
-        path = _cache_artifact(f"{args.pkg}_{args.classpath}", ".pcode", code)
-        print(f"Cached: {path}")
-    elif args.op == "modify-code":
-        if not args.file:
-            print("ERROR: modify-code requires <file>", file=sys.stderr)
-            sys.exit(1)
-        code = Path(args.file).read_text(encoding="utf-8") if Path(args.file).exists() else args.file
-        payload["operationType"] = "modifyPeopleCode"
-        payload["classPath"] = args.classpath
-        payload["peoplecode"] = json_escape(code)
-        _write_verified_peoplecode("AI_OPER_APP_PKG_POST.v1/", payload, code)
-        print("OK — code saved; readback verified.")
-    elif args.op == "insert-class":
-        payload["operationType"] = "insertClass"
-        payload["classPath"] = args.classpath
-        data = _api_call("AI_OPER_APP_PKG_POST.v1/", payload)
-        print(f"OK — class inserted: {args.classpath}")
-    elif args.op == "insert-package":
-        payload["operationType"] = "insertPackage"
-        payload["classPath"] = args.classpath
-        data = _api_call("AI_OPER_APP_PKG_POST.v1/", payload)
-        print(f"OK — package inserted: {args.classpath}")
+    from app_package import execute
+    return execute(sys.modules[__name__], args)
+
 
 def _print_pkg_tree(node, indent):
     prefix = "  " * indent + ("├─ " if indent > 0 else "")
     tag = f"[{node.get('nodeType', '?')}]"
+    version = node.get("programVersion") if node.get("nodeType") == "class" else node.get("packageVersion")
+    if version is not None:
+        tag += f" version={version}"
     print(f"{prefix}{node.get('nodeName', '?')} {tag}")
     for child in node.get("children", []):
         _print_pkg_tree(child, indent + 1)
 
 # ── sql ───────────────────────────────────────────────
 def cmd_sql(args):
-    if args.op == "view":
-        data = _api_call("AI_OPER_SQL_DEFN.v1/", {
-            "sqlId": args.sqlid, "operationType": "view"
-        })
-        print(f"sqlId: {data.get('sqlId')}")
-        print(f"sqlType: {data.get('sqlType')}")
-        print(f"lastUpdate: {data.get('lastUpdate')}")
-        for stmt in data.get("statements", []):
-            print(f"\n--- [{stmt.get('market')}/{stmt.get('dbType')}] {stmt.get('effdt')} ---")
-            sql_text = stmt.get("sqlText", "")
-            print(sql_text)
-            path = _cache_artifact(
-                f"{args.sqlid}_{stmt.get('market')}_{stmt.get('dbType')}_{stmt.get('effdt')}",
-                ".sql",
-                sql_text,
-            )
-            print(f"Cached: {path}")
-            if stmt.get("descr"):
-                print(f"descr: {stmt.get('descr')}")
-            if stmt.get("comment"):
-                print(f"comment: {stmt.get('comment')}")
-    elif args.op == "create":
-        if not args.file:
-            print("ERROR: create requires <file> or inline JSON", file=sys.stderr)
-            sys.exit(1)
-        stmt_data = _load_json_arg(args.file, "create 的 JSON")
-        for s in stmt_data.get("statements", []):
-            if "dbType" in s:
-                s["dbType"] = _normalize_dbtype(s["dbType"])
-            if "sqlText" in s:
-                s["sqlText"] = json_escape(s["sqlText"])
-            if "comment" in s:
-                s["comment"] = json_escape(s["comment"])
-        data = _api_call("AI_OPER_SQL_DEFN.v1/", {
-            "sqlId": args.sqlid, "operationType": "create", "statements": stmt_data.get("statements", [])
-        })
-        print(f"OK — SQL created: {args.sqlid}")
-    elif args.op == "modify":
-        payload = {
-            "sqlId": args.sqlid, "operationType": "modify",
-            "market": args.market, "dbType": args.dbtype, "effdt": args.effdt
-        }
-        if args.sqltext_file:
-            payload["sqlText"] = json_escape(Path(args.sqltext_file).read_text(encoding="utf-8"))
-        if args.comment_file:
-            payload["comment"] = json_escape(Path(args.comment_file).read_text(encoding="utf-8"))
-        data = _api_call("AI_OPER_SQL_DEFN.v1/", payload)
-        if args.sqltext_file:
-            actual = _api_call("AI_OPER_SQL_DEFN.v1/", {"sqlId": args.sqlid, "operationType": "view"})
-            expected_db = 32 if args.dbtype == "" else 48 + int(args.dbtype)
-            matching = [s for s in actual.get("statements", [])
-                        if s.get("market") == args.market and int(s.get("dbType", -1)) == expected_db
-                        and str(s.get("effdt", ""))[:10] == args.effdt]
-            expected_text = Path(args.sqltext_file).read_text(encoding="utf-8")
-            if len(matching) != 1 or re.sub(r"\s+", " ", matching[0].get("sqlText", "")).strip() != re.sub(r"\s+", " ", expected_text).strip():
-                raise PSAPIError("SQL write was acknowledged but the target Statement readback differs.")
-        print(f"OK — SQL modified: {args.sqlid}")
+    from sql_project_operations import handle_sql
+    return handle_sql(sys.modules[__name__], args)
 
 # ── ae ────────────────────────────────────────────────
 def cmd_ae(args):
-    if args.op == "delete-code":
-        if not args.sectionid or not args.stepid:
-            raise PSAPIError("AE delete-code requires --sectionid and --stepid.")
-        return _delete_verified_peoplecode("AI_OPER_APP_ENGINE.v1/", dict(aeId=args.aeid,
-            sectionId=args.sectionid, market=args.market, dbType=args.dbtype,
-            effdt=args.effdt, stepId=args.stepid), args)
-    if args.op == "struct":
-        data = _api_call("AI_OPER_APP_ENGINE.v1/", {
-            "aeId": args.aeid, "operationType": "struct"
-        })
-        print(f"AE: {args.aeid}")
-        print(f"descr: {data.get('descr', '')}")
-        print(f"lastUpdate: {data.get('lastUpdate', '')}")
-        ms = data.get("program", {})
-        print(f"\nMain Section: {ms.get('sectionType', '')} publicAccess={ms.get('publicAccess', '')}")
-        for detail in ms.get("detail", []):
-            print(f"\n  [{detail.get('market')}/{detail.get('dbType')}] {detail.get('descr', '')} "
-                  f"effdt={detail.get('effdt')} autoCommit={detail.get('autoCommit')}")
-            for step in detail.get("steps", []):
-                print(f"    Step: {step.get('stepId')} [{step.get('activeStatus')}] "
-                      f"abend={step.get('abendAction')} commit={step.get('commitAfter')}")
-                for action in step.get("actions", []):
-                    print(f"      Action: {action.get('actionType')} {action.get('descr', '')}")
-    elif args.op == "create":
-        payload = {"aeId": args.aeid, "operationType": "createApplicationEngine"}
-        if args.descr:
-            payload["descr"] = args.descr
-        if args.comment:
-            payload["comment"] = json_escape(args.comment)
-        data = _api_call("AI_OPER_APP_ENGINE.v1/", payload)
-        print(f"OK — AE created: {args.aeid}")
-    elif args.op == "insert-section":
-        payload = {"aeId": args.aeid, "operationType": "insertSection"}
-        if args.sectionid:
-            payload["sectionId"] = args.sectionid
-        if args.market:
-            payload["market"] = args.market
-        if args.dbtype:
-            payload["dbType"] = args.dbtype
-        if args.effdt:
-            payload["effdt"] = args.effdt
-        data = _api_call("AI_OPER_APP_ENGINE.v1/", payload)
-        print(f"OK — Section inserted.")
-    elif args.op == "insert-step":
-        payload = {
-            "aeId": args.aeid, "operationType": "insertStep",
-            "sectionId": args.sectionid, "market": args.market,
-            "dbType": args.dbtype, "effdt": args.effdt
-        }
-        if args.stepid:
-            payload["stepId"] = args.stepid
-        if args.descr:
-            payload["descr"] = args.descr
-        data = _api_call("AI_OPER_APP_ENGINE.v1/", payload)
-        print(f"OK — Step inserted.")
-    elif args.op == "insert-action":
-        payload = {
-            "aeId": args.aeid, "operationType": "insertAction",
-            "sectionId": args.sectionid, "market": args.market,
-            "dbType": args.dbtype, "effdt": args.effdt,
-            "stepId": args.stepid, "actionType": args.actiontype
-        }
-        if args.descr:
-            payload["descr"] = args.descr
-        data = _api_call("AI_OPER_APP_ENGINE.v1/", payload)
-        print(f"OK — Action inserted.")
-    elif args.op == "view-sql":
-        data = _api_call("AI_OPER_APP_ENGINE.v1/", {
-            "aeId": args.aeid, "operationType": "viewSQL",
-            "sectionId": args.sectionid, "market": args.market,
-            "dbType": args.dbtype, "effdt": args.effdt,
-            "stepId": args.stepid, "actionType": args.actiontype
-        })
-        print(f"sqlId: {data.get('sqlId')}  sqlType: {data.get('sqlType')}  stmtCount: {data.get('stmtCount')}")
-        print(f"lastUpdate: {data.get('lastUpdate')}")
-        sql_text = data.get("sqlText", "")
-        print(f"\n{sql_text}")
-        path = _cache_artifact(
-            f"{args.aeid}_{args.sectionid}_{args.stepid}_{args.actiontype}",
-            ".sql",
-            sql_text,
-        )
-        print(f"Cached: {path}")
-    elif args.op == "modify-sql":
-        if not args.file:
-            print("ERROR: modify-sql requires <file>", file=sys.stderr)
-            sys.exit(1)
-        sql_text = Path(args.file).read_text(encoding="utf-8") if Path(args.file).exists() else args.file
-        data = _api_call("AI_OPER_APP_ENGINE.v1/", {
-            "aeId": args.aeid, "operationType": "modifySQL",
-            "sectionId": args.sectionid, "market": args.market,
-            "dbType": args.dbtype, "effdt": args.effdt,
-            "stepId": args.stepid, "actionType": args.actiontype,
-            "sqlText": json_escape(sql_text)
-        })
-        print("OK — SQL modified.")
-    elif args.op == "view-code":
-        data = _api_call("AI_OPER_APP_ENGINE.v1/", {
-            "aeId": args.aeid, "operationType": "viewPeopleCode",
-            "sectionId": args.sectionid, "market": args.market,
-            "dbType": args.dbtype, "effdt": args.effdt,
-            "stepId": args.stepid
-        })
-        code = data.get("peoplecode", "")
-        print(code)
-        path = _cache_artifact(
-            f"{args.aeid}_{args.sectionid}_{args.stepid}",
-            ".pcode",
-            code,
-        )
-        print(f"Cached: {path}")
-    elif args.op == "modify-code":
-        if not args.file:
-            print("ERROR: modify-code requires <file>", file=sys.stderr)
-            sys.exit(1)
-        code = Path(args.file).read_text(encoding="utf-8") if Path(args.file).exists() else args.file
-        _write_verified_peoplecode("AI_OPER_APP_ENGINE.v1/", {
-            "aeId": args.aeid, "operationType": "modifyPeopleCode",
-            "sectionId": args.sectionid, "market": args.market,
-            "dbType": args.dbtype, "effdt": args.effdt,
-            "stepId": args.stepid,
-            "peopleCode": json_escape(code)
-        }, code)
-        print("OK — PeopleCode modified; readback verified.")
-    elif args.op == "insert-state-record":
-        data = _api_call("AI_OPER_APP_ENGINE.v1/", {
-            "aeId": args.aeid, "operationType": "insertStateRecord",
-            "recName": args.recname
-        })
-        print(f"OK — State Record inserted: {args.recname}")
-    elif args.op == "insert-temp-table":
-        data = _api_call("AI_OPER_APP_ENGINE.v1/", {
-            "aeId": args.aeid, "operationType": "insertTempTable",
-            "recName": args.recname
-        })
-        print(f"OK — Temp Table inserted: {args.recname}")
+    from ae_operations import handle
+    return handle(sys.modules[__name__], args)
+
 
 # ── component ────────────────────────────────────────
 def cmd_component(args):
-    if args.op == "delete-code":
-        if not args.event or (args.field and not args.record):
-            raise PSAPIError("Component delete-code requires --event; --field also requires --record.")
-        payload = dict(pnlGrpName=args.pnlgrpname, market=args.market or "GBL", event=args.event)
-        if args.record:
-            payload["recordName"] = args.record
-        if args.field:
-            payload["fieldName"] = args.field
-        return _delete_verified_peoplecode("AI_OPER_COMPONENT_DEFN.v1/", payload, args)
-    if args.op == "structDeep":
-        payload = {"pnlGrpName": args.pnlgrpname, "operationType": "structDeep"}
-        if args.market:
-            payload["market"] = args.market
-        data = _api_call("AI_OPER_COMPONENT_DEFN.v1/", payload)
-        _print_component_struct_deep(data)
-    elif args.op == "struct":
-        if args.deep:
-            payload_deep = {"pnlGrpName": args.pnlgrpname, "operationType": "structDeep"}
-            if args.market:
-                payload_deep["market"] = args.market
-            data_deep = _api_call("AI_OPER_COMPONENT_DEFN.v1/", payload_deep)
-            _print_component_struct_deep(data_deep)
-        else:
-            payload = {"pnlGrpName": args.pnlgrpname, "operationType": "struct"}
-            if args.market:
-                payload["market"] = args.market
-            data = _api_call("AI_OPER_COMPONENT_DEFN.v1/", payload)
-            _print_component_struct(data)
-    elif args.op == "view-code":
-        if not args.event:
-            print("ERROR: view-code requires --event", file=sys.stderr)
-            sys.exit(1)
-        payload = {"pnlGrpName": args.pnlgrpname, "market": args.market or "GBL", "operationType": "viewPeopleCode", "event": args.event}
-        if args.record:
-            payload["recordName"] = args.record
-        if args.field:
-            payload["fieldName"] = args.field
-        data = _api_call("AI_OPER_COMPONENT_DEFN.v1/", payload)
-        code = data.get("peoplecode")
-        print(code if code else "(no peoplecode)")
-        path = _cache_artifact(
-            f"{args.pnlgrpname}_{args.record}_{args.field}_{args.event}",
-            ".pcode",
-            code or "",
-        )
-        print(f"Cached: {path}")
-    elif args.op == "modify-code":
-        if not args.file:
-            print("ERROR: modify-code requires <file>")
-            sys.exit(1)
-        if not args.event:
-            print("ERROR: modify-code requires --event", file=sys.stderr)
-            sys.exit(1)
-        code_path = Path(args.file)
-        code = code_path.read_text(encoding="utf-8") if code_path.exists() else args.file
-        payload = {"pnlGrpName": args.pnlgrpname, "market": args.market or "GBL", "operationType": "modifyPeopleCode", "event": args.event, "peoplecode": json_escape(code)}
-        if args.record:
-            payload["recordName"] = args.record
-        if args.field:
-            payload["fieldName"] = args.field
-        _write_verified_peoplecode("AI_OPER_COMPONENT_DEFN.v1/", payload, code)
-        print("OK — Component PeopleCode saved; readback verified.")
+    from component_operations import handle
+    return handle(sys.modules[__name__], args)
 
 def _print_component_struct_deep(comp_data):
     """Component > Level > Record > Field 层级树（无 Page 层）"""
@@ -1452,116 +1203,9 @@ def _print_component_struct(data):
 
 # ── record ────────────────────────────────────────────
 def cmd_record(args):
-    if args.op == "delete-code":
-        if not args.fieldname or not args.event:
-            raise PSAPIError("Record delete-code requires --fieldname and --event.")
-        return _delete_verified_peoplecode("AI_OPER_RECORD_DEFN.v1/", dict(recordName=args.recname,
-            fieldName=args.fieldname,event=args.event), args)
-    if args.op == "struct":
-        data = _api_call("AI_OPER_RECORD_DEFN.v1/", {
-            "recordName": args.recname, "operationType": "struct"
-        })
-        _print_record_struct(data)
-    elif args.op == "create":
-        if not args.file:
-            print("ERROR: create requires <file> or inline JSON", file=sys.stderr)
-            sys.exit(1)
-        rec_data = _load_json_arg(args.file, "create 的 JSON")
-        payload = {"recordName": args.recname, "operationType": "createRecord", **rec_data}
-        if "comment" in payload:
-            payload["comment"] = json_escape(payload["comment"])
-        data = _api_call("AI_OPER_RECORD_DEFN.v1/", payload)
-        print(f"OK — Record created: {args.recname}")
-    elif args.op == "build":
-        data = _api_call("AI_OPER_RECORD_DEFN.v1/", {
-            "recordName": args.recname, "operationType": "buildRecord",
-            "createTable": [args.recname]
-        })
-        print(f"OK — Record built: {args.recname}")
-        print(data.get("message", ""))
-    elif args.op == "alter":
-        data = _api_call("AI_OPER_RECORD_DEFN.v1/", {
-            "recordName": args.recname, "operationType": "buildRecord",
-            "alterTable": [args.recname]
-        })
-        print(f"OK — Record altered: {args.recname}")
-    elif args.op == "modify":
-        if not args.file:
-            print("ERROR: modify requires <file> or inline JSON", file=sys.stderr)
-            sys.exit(1)
-        rec_data = _load_json_arg(args.file, "modify 的 JSON")
-        if "comment" in rec_data:
-            rec_data["comment"] = json_escape(rec_data["comment"])
-        data = _api_call("AI_OPER_RECORD_DEFN.v1/", {"recordName": args.recname, "operationType": "modifyRecord", **rec_data})
-        print(f"OK — Record modified: {args.recname}")
-    elif args.op == "create-view":
-        data = _api_call("AI_OPER_RECORD_DEFN.v1/", {
-            "recordName": args.recname, "operationType": "buildRecord",
-            "createView": [args.recname]
-        })
-        print(f"OK — View created: {args.recname}")
-    elif args.op == "view-sql":
-        data = _api_call("AI_OPER_RECORD_DEFN.v1/", {
-            "recordName": args.recname, "operationType": "viewSQL"
-        })
-        print(f"Record: {args.recname}  exists: {data.get('exists')}  sqlType: {data.get('sqlType')}")
-        if data.get("lastUpdate"):
-            print(f"lastUpdate: {data.get('lastUpdate')}")
-        for stmt in data.get("statements", []):
-            print(f"\n--- [{stmt.get('market')}/{stmt.get('dbType')}] {stmt.get('effdt')} ---")
-            sql_text = stmt.get("sqlText", "")
-            print(sql_text)
-            path = _cache_artifact(
-                f"{args.recname}_{stmt.get('market')}_{stmt.get('dbType')}_{stmt.get('effdt')}",
-                ".sql",
-                sql_text,
-            )
-            print(f"Cached: {path}")
-            if stmt.get("descr"):
-                print(f"descr: {stmt.get('descr')}")
-            if stmt.get("comment"):
-                print(f"comment: {stmt.get('comment')}")
-    elif args.op == "modify-sql":
-        if not args.file:
-            print("ERROR: modify-sql requires <file> (SQL text)")
-            sys.exit(1)
-        sql_text = Path(args.file).read_text(encoding="utf-8") if Path(args.file).exists() else args.file
-        data = _api_call("AI_OPER_RECORD_DEFN.v1/", {
-            "recordName": args.recname, "operationType": "modifySQL",
-            "sqlText": json_escape(sql_text)
-        })
-        print(f"OK — View SQL modified: {args.recname}")
-    elif args.op == "view-code":
-        if not args.fieldname or not args.event:
-            print("ERROR: view-code requires --fieldname and --event", file=sys.stderr)
-            sys.exit(1)
-        data = _api_call("AI_OPER_RECORD_DEFN.v1/", {
-            "recordName": args.recname, "operationType": "viewPeopleCode",
-            "fieldName": args.fieldname, "event": args.event
-        })
-        code = data.get("peoplecode")
-        print(code if code else "(no peoplecode)")
-        path = _cache_artifact(
-            f"{args.recname}_{args.fieldname}_{args.event}",
-            ".pcode",
-            code or "",
-        )
-        print(f"Cached: {path}")
-    elif args.op == "modify-code":
-        if not args.file:
-            print("ERROR: modify-code requires <file>")
-            sys.exit(1)
-        if not args.fieldname or not args.event:
-            print("ERROR: modify-code requires --fieldname and --event", file=sys.stderr)
-            sys.exit(1)
-        code_path = Path(args.file)
-        code = code_path.read_text(encoding="utf-8") if code_path.exists() else args.file
-        _write_verified_peoplecode("AI_OPER_RECORD_DEFN.v1/", {
-            "recordName": args.recname, "operationType": "modifyPeopleCode",
-            "fieldName": args.fieldname, "event": args.event,
-            "peoplecode": json_escape(code)
-        }, code)
-        print("OK — Record PeopleCode modified; readback verified.")
+    from definition_operations import execute
+    return execute(sys.modules[__name__], args)
+
 
 def _print_record_struct(data):
     print(f"Record: {data.get('recName')}")
@@ -1685,15 +1329,54 @@ def _parse_project_check(value):
 
 
 def _validate_project_action(object_type, action):
-    if action == 3 and object_type not in (0, 2):
-        raise PSAPIError("CopyProp (upgradeAction=3) is only supported for Record (objectType=0) and Field (objectType=2).")
+    if action is not None and action not in (0, 1, 2, 3):
+        raise PSAPIError("upgradeAction must be 0 through 3.")
 
 
 def _project_item_key(item):
     """Keep all native IDs; normalize only PeopleTools trailing blank padding."""
     return (item.get("objectType"),) + tuple(
-        (item.get(f"objectId{i}"), (item.get(f"objectValue{i}") or "").rstrip())
+        (item.get(f"objectId{i}"), (item.get(f"objectValue{i}") or "").rstrip(" "))
         for i in range(1, 5))
+
+
+def _insert_project_item(project, object_type, values, action=0, take_action=1):
+    """Reinsert as AD does, then verify the full key and reset comparison flags."""
+    _validate_project_action(object_type, action)
+    if take_action not in (0, 1):
+        raise PSAPIError("takeAction must be 0 or 1.")
+    if len(values) > 4 or not values or not values[0]:
+        raise PSAPIError("Project insertion requires one to four key values.")
+    padded = list(values) + [""] * (4 - len(values))
+    if object_type == 30 and not padded[1].strip(" "):
+        padded[1] = "0"
+    payload = dict(projectName=project, operationType="insertItem", objectType=object_type,
+                   upgradeAction=action, takeAction=take_action,
+                   **{f"objectValue{i+1}": value for i, value in enumerate(padded)})
+    from sql_project_operations import read, write, _after
+    # Automatic registration is its own operation: retain this first baseline through save.
+    original = read(sys.modules[__name__], 'project', project)
+    if not original.get('exists'):
+        raise PSAPIError('Project 不存在，未登记。')
+    result = write(sys.modules[__name__], 'project', project, payload, original)
+    rows = _after(sys.modules[__name__], 'project', project, result)['items']
+    wanted = [value.rstrip(" ") for value in padded]
+    matches = [row for row in rows if row.get("objectType") == object_type and
+               [(row.get(f"objectValue{i}") or "").rstrip(" ") for i in range(1, 5)] == wanted]
+    if len(matches) != 1:
+        raise PSAPIError("Project insertion was acknowledged but one exact member was not found; inspect before retrying.")
+    expected = dict(upgradeAction=action, takeAction=take_action, copyDone=0, sourceStatus=0, targetStatus=0)
+    if any(matches[0].get(name) != value for name, value in expected.items()):
+        raise PSAPIError("Project reinsertion readback differs; inspect before retrying.")
+    return result, matches[0]
+
+
+def _require_project(project):
+    from sql_project_operations import read
+    result = read(sys.modules[__name__], 'project', project)
+    if result.get('exists') is not True:
+        raise PSAPIError('Project 不存在：' + project)
+    return result
 
 
 def _project_item_flags(item):
@@ -1711,147 +1394,9 @@ def _format_project_flags(item):
             f"Upgrade={check('takeAction')} Done={check('copyDone')}")
 
 
-def _update_project_item(args, payload):
-    changes = {name: getattr(args, attr, None) for name, attr in (
-        ("upgradeAction", "upgrade_action"), ("takeAction", "take_action"), ("copyDone", "copy_done"))}
-    changes = {name: value for name, value in changes.items() if value is not None}
-    if not changes:
-        raise PSAPIError("update-item requires --action, --upgrade or --done (numeric aliases are also supported).")
-    for name, value in changes.items():
-        allowed = (0, 1, 2, 3) if name == "upgradeAction" else (0, 1)
-        if value not in allowed:
-            raise PSAPIError(f"Invalid {name}: {value}; expected {allowed}.")
-    if args.object_type is None or not args.value1:
-        raise PSAPIError("update-item requires --object-type and --value1; supply every nonblank --value2..--value4.")
-    _validate_project_action(args.object_type, changes.get("upgradeAction"))
-    ids = [getattr(args, f"id{i}", None) for i in range(1, 5)]
-    if any(value is not None for value in ids) and any(value is None for value in ids):
-        raise PSAPIError("Provide all four --id1..--id4 or omit all four to resolve them from project struct.")
-    values = [(getattr(args, f"value{i}", None) or "").rstrip() for i in range(1, 5)]
-    query = dict(payload, operationType="struct")
-    before = _api_call("AI_OPER_PROJECT_DEFN.v1/", query)
-    matches = [item for item in before.get("items", [])
-               if item.get("objectType") == args.object_type
-               and [(item.get(f"objectValue{i}") or "").rstrip() for i in range(1, 5)] == values
-               and (ids[0] is None or [item.get(f"objectId{i}") for i in range(1, 5)] == ids)]
-    if len(matches) != 1:
-        raise PSAPIError(f"Expected one exact Project item, found {len(matches)}; check project struct and all key values/IDs.")
-    target = matches[0]
-    expected = dict(_project_item_flags(target), **changes)
-    payload.update(operationType="updateItem", objectType=args.object_type, **changes)
-    for i in range(1, 5):
-        payload[f"objectId{i}"] = target[f"objectId{i}"]
-        payload[f"objectValue{i}"] = target[f"objectValue{i}"]
-    result = _api_call("AI_OPER_PROJECT_DEFN.v1/", payload)
-    if result.get("updated") is not True:
-        raise PSAPIError("Server did not confirm the Project item update.")
-    after = _api_call("AI_OPER_PROJECT_DEFN.v1/", query)
-    matches = [item for item in after.get("items", []) if _project_item_key(item) == _project_item_key(target)]
-    if len(matches) != 1 or _project_item_flags(matches[0]) != expected:
-        raise PSAPIError("Project flag readback does not match the requested state; inspect project struct before retrying.")
-    print(f"OK — project item updated and verified: {args.projectname}")
-    print(f"  objectType={target['objectType']} " + " ".join(f"value{i}={values[i-1]!r}" for i in range(1, 5)))
-    print(f"  {_format_project_flags(matches[0])}")
-
-
 def cmd_project(args):
-    """操作 Project 定义：AI_OPER_PROJECT_DEFN_POST"""
-    if args.op == "current":
-        active = _active_project()
-        if active:
-            print(f"Current project for environment {ENVIRONMENT}: {active}")
-        else:
-            print(f"No project selected for environment {ENVIRONMENT} yet.")
-            print("NEXT: python scripts/peoplesoft_api.py project use <name>")
-        return
-
-    if not args.projectname:
-        print(f"ERROR: project {args.op} requires a project name", file=sys.stderr)
-        sys.exit(2)
-
-    if args.op == "use":
-        _set_active_project(args.projectname)
-        print(f"Current project for environment {ENVIRONMENT}: {args.projectname}")
-        return
-
-    payload = {"projectName": args.projectname}
-    if args.op == "create":
-        payload["operationType"] = "createProject"
-        if args.descr:
-            payload["descr"] = args.descr
-        if args.comment:
-            payload["comment"] = json_escape(args.comment)
-        _api_call("AI_OPER_PROJECT_DEFN.v1/", payload)
-        _set_active_project(args.projectname)
-        print(f"OK — project created: {args.projectname}")
-        print(f"Current project for environment {ENVIRONMENT}: {args.projectname}")
-    elif args.op == "insert-item":
-        if getattr(args, "copy_done", None) is not None:
-            raise PSAPIError("Set Done with project update-item after inserting the item.")
-        payload["operationType"] = "insertItem"
-        if args.object_type is None:
-            print("ERROR: insert-item requires --object-type", file=sys.stderr)
-            sys.exit(1)
-        _validate_project_action(args.object_type, args.upgrade_action)
-        payload["objectType"] = args.object_type
-        if args.value1:
-            payload["objectValue1"] = args.value1
-        if args.value2 is not None:
-            payload["objectValue2"] = args.value2
-        elif args.object_type == 30:
-            payload["objectValue2"] = "0"
-        if args.value3:
-            payload["objectValue3"] = args.value3
-        if args.value4:
-            payload["objectValue4"] = args.value4
-        if args.upgrade_action is not None:
-            payload["upgradeAction"] = args.upgrade_action
-        # 默认勾上 Upgrade（takeAction=1），保证迁移时该定义会被带到目标库；
-        # 服务器端未传时默认 0（不勾选），因此这里必须显式传 1。显式 --take-action 0 可关闭。
-        payload["takeAction"] = args.take_action if args.take_action is not None else 1
-        result = _api_call("AI_OPER_PROJECT_DEFN.v1/", payload)
-        _set_active_project(args.projectname)
-        if result.get("inserted") is False:
-            print(f"OK — item already exists in project: {args.projectname}; existing flags preserved. Use update-item to change flags.")
-        else:
-            print(f"OK — item inserted into project: {args.projectname} (takeAction={payload['takeAction']})")
-        print(f"Current project for environment {ENVIRONMENT}: {args.projectname}")
-    elif args.op == "update-item":
-        _update_project_item(args, payload)
-    elif args.op == "delete-item":
-        if args.object_type is None or any(getattr(args, f"id{i}") is None for i in range(1, 5)):
-            raise PSAPIError(f"{args.op} requires --object-type and all four --id1..--id4 from project struct.")
-        payload.update(operationType="deleteItem", objectType=args.object_type)
-        for i in range(1, 5):
-            payload[f"objectId{i}"] = getattr(args, f"id{i}")
-            payload[f"objectValue{i}"] = getattr(args, f"value{i}") or ""
-        _api_call("AI_OPER_PROJECT_DEFN.v1/", payload)
-        print(f"OK — project item removed: {args.projectname}")
-    elif args.op == "modify":
-        payload["operationType"] = "modifyProject"
-        if args.descr:
-            payload["descr"] = args.descr
-        if args.comment:
-            payload["comment"] = json_escape(args.comment)
-        _api_call("AI_OPER_PROJECT_DEFN.v1/", payload)
-        _set_active_project(args.projectname)
-        print(f"OK — project modified: {args.projectname}")
-        print(f"Current project for environment {ENVIRONMENT}: {args.projectname}")
-    elif args.op == "struct":
-        payload["operationType"] = "struct"
-        data = _api_call("AI_OPER_PROJECT_DEFN.v1/", payload)
-        if getattr(args, "json", False):
-            print(json.dumps(data, ensure_ascii=False, indent=2))
-            return
-        print(f"Project: {data.get('projectName')}")
-        items = data.get("items", [])
-        if not items:
-            print("(no items)")
-            return
-        print(f"Items ({len(items)}):")
-        for it in items:
-            keys = "  ".join(f"id{i}={it.get(f'objectId{i}')} value{i}={it.get(f'objectValue{i}')}" for i in range(1, 5))
-            print(f"  objectType={it.get('objectType')}  {keys}  {_format_project_flags(it)}")
+    from sql_project_operations import handle_project
+    return handle_project(sys.modules[__name__], args)
 
 # ── get-field ────────────────────────────────────────
 def cmd_get_field(args):
@@ -1891,164 +1436,10 @@ def _print_page_struct(data, full=False):
 
 
 def cmd_page(args):
-    """Page 定义操作：AI_OPER_PAGE_DEFN"""
-    if args.op == "delete-code":
-        return _delete_verified_peoplecode("AI_OPER_PAGE_DEFN.v1/", {"pageName": args.pagename}, args)
-    if args.op == "struct":
-        payload = {"pageName": args.pagename, "operationType": "struct"}
-        if args.full:
-            payload["full"] = 1
-        data = _api_call("AI_OPER_PAGE_DEFN.v1/", payload)
-        if args.json:
-            print(json.dumps(data, ensure_ascii=False, indent=1))
-        else:
-            _print_page_struct(data, full=args.full)
-    elif args.op == "view-code":
-        payload = {"pageName": args.pagename, "operationType": "viewPeopleCode"}
-        data = _api_call("AI_OPER_PAGE_DEFN.v1/", payload)
-        code = data.get("peoplecode")
-        print(code if code else "(no Activate PeopleCode)")
-        path = _cache_artifact(f"{args.pagename}_Activate", ".pcode", code or "")
-        print(f"Cached: {path}")
-    elif args.op == "modify-code":
-        if not args.file:
-            print("ERROR: modify-code requires --file", file=sys.stderr)
-            sys.exit(1)
-        code_path = Path(args.file)
-        code = code_path.read_text(encoding="utf-8") if code_path.exists() else args.file
-        payload = {"pageName": args.pagename, "operationType": "modifyPeopleCode", "peoplecode": json_escape(code)}
-        _write_verified_peoplecode("AI_OPER_PAGE_DEFN.v1/", payload, code)
-        print(f"OK — page PeopleCode updated; readback verified: {args.pagename}")
-    elif args.op == "create":
-        payload = {"pageName": args.pagename, "operationType": "createPage"}
-        if args.descr:
-            payload["descr"] = args.descr
-        if args.comment:
-            payload["comment"] = json_escape(args.comment)
-        if args.pnl_type is not None:
-            payload["pnlType"] = args.pnl_type
-        _api_call("AI_OPER_PAGE_DEFN.v1/", payload)
-        print(f"OK — page created: {args.pagename}")
-        print("NEXT: project insert-item <proj> --object-type 5 --value1 " + args.pagename)
-    elif args.op == "modify-props":
-        payload = {"pageName": args.pagename, "operationType": "modifyPageProps"}
-        if args.descr:
-            payload["descr"] = args.descr
-        if args.comment:
-            payload["comment"] = json_escape(args.comment)
-        if args.pnl_type is not None:
-            payload["pnlType"] = args.pnl_type
-        if args.defer_proc is not None:
-            payload["deferProc"] = args.defer_proc
-        if args.panel_right is not None:
-            payload["panelRight"] = args.panel_right
-        if args.panel_bottom is not None:
-            payload["panelBottom"] = args.panel_bottom
-        _api_call("AI_OPER_PAGE_DEFN.v1/", payload)
-        print(f"OK — page props updated: {args.pagename}")
-    elif args.op == "add-control":
-        if not args.control_type:
-            print("ERROR: add-control requires --control-type", file=sys.stderr)
-            sys.exit(1)
-        payload = {"pageName": args.pagename, "operationType": "addControl", "controlType": args.control_type}
-        if args.rec:
-            payload["recName"] = args.rec
-        if args.field:
-            payload["fieldName"] = args.field
-        if args.label_text:
-            payload["labelText"] = args.label_text
-        if args.label_id:
-            payload["labelId"] = args.label_id
-        if args.left is not None:
-            payload["left"] = args.left
-        if args.top is not None:
-            payload["top"] = args.top
-        if args.right is not None:
-            payload["right"] = args.right
-        if args.bottom is not None:
-            payload["bottom"] = args.bottom
-        if args.occurs_level is not None:
-            payload["occursLevel"] = args.occurs_level
-        if args.required is not None:
-            payload["required"] = args.required
-        if args.invisible is not None:
-            payload["invisible"] = args.invisible
-        if args.display_only is not None:
-            payload["displayOnly"] = args.display_only
-        if args.on_value:
-            payload["onValue"] = args.on_value
-        if args.off_value:
-            payload["offValue"] = args.off_value
-        if args.sub_pnl_name:
-            payload["subPnlName"] = args.sub_pnl_name
-        if args.html_text:
-            payload["htmlText"] = json_escape(args.html_text)
-        if args.pb_display_type is not None:
-            payload["pbDisplayType"] = args.pb_display_type
-        data = _api_call("AI_OPER_PAGE_DEFN.v1/", payload)
-        print(f"OK — control added: {args.control_type} pnlFldId={data.get('pnlFldId')} on {args.pagename}")
-    elif args.op == "del-control":
-        if args.pnl_fld_id is None:
-            print("ERROR: del-control requires --pnl-fld-id", file=sys.stderr)
-            sys.exit(1)
-        payload = {"pageName": args.pagename, "operationType": "deleteControl", "pnlFldId": args.pnl_fld_id}
-        _api_call("AI_OPER_PAGE_DEFN.v1/", payload)
-        print(f"OK — control deleted: pnlFldId={args.pnl_fld_id} on {args.pagename}")
-    elif args.op == "find":
-        payload = {"pageName": args.pagename, "operationType": "findControls"}
-        if args.rec:
-            payload["recName"] = args.rec
-        if args.field:
-            payload["fieldName"] = args.field
-        if args.label_text:
-            payload["labelContains"] = args.label_text
-        if args.field_type:
-            payload["fieldType"] = args.field_type
-        data = _api_call("AI_OPER_PAGE_DEFN.v1/", payload)
-        print(f"Page: {data.get('pageName')}  matches={data.get('matchCount')}")
-        for it in data.get("items", []):
-            print(f"  #{it.get('pnlFldId'):>3} type={it.get('fieldType'):<3} {str(it.get('recName', ''))}.{str(it.get('fieldName', ''))}  label={it.get('labelText', '') or it.get('labelId', '')}  pos=({it.get('left')},{it.get('top')})")
-    elif args.op == "mod-control":
-        if args.pnl_fld_id is None:
-            print("ERROR: mod-control requires --pnl-fld-id", file=sys.stderr)
-            sys.exit(1)
-        payload = {"pageName": args.pagename, "operationType": "modifyControl", "pnlFldId": args.pnl_fld_id}
-        if args.label_text:
-            payload["labelText"] = args.label_text
-        if args.label_id:
-            payload["labelId"] = args.label_id
-        if args.left is not None:
-            payload["left"] = args.left
-        if args.top is not None:
-            payload["top"] = args.top
-        if args.right is not None:
-            payload["right"] = args.right
-        if args.bottom is not None:
-            payload["bottom"] = args.bottom
-        if args.occurs_level is not None:
-            payload["occursLevel"] = args.occurs_level
-        if args.required is not None:
-            payload["required"] = args.required
-        if args.invisible is not None:
-            payload["invisible"] = args.invisible
-        if args.display_only is not None:
-            payload["displayOnly"] = args.display_only
-        if args.edit_size is not None:
-            payload["editSize"] = args.edit_size
-        if args.label_type is not None:
-            payload["labelType"] = args.label_type
-        if args.label_loc is not None:
-            payload["labelLoc"] = args.label_loc
-        if args.field_style:
-            payload["fieldStyle"] = args.field_style
-        if args.label_style:
-            payload["labelStyle"] = args.label_style
-        if args.defer_proc is not None:
-            payload["deferProc"] = args.defer_proc
-        data = _api_call("AI_OPER_PAGE_DEFN.v1/", payload)
-        ctl = data.get("control", {})
-        print(f"OK — control modified: pnlFldId={args.pnl_fld_id} on {args.pagename}")
-        print(f"  now: label={ctl.get('labelText', '') or ctl.get('labelId', '')} pos=({ctl.get('left')},{ctl.get('top')},{ctl.get('right')},{ctl.get('bottom')}) use={ctl.get('fieldUse')}")
+    """Page operations retain the version of the user's editing baseline."""
+    from page_operations import handle_page
+    return handle_page(sys.modules[__name__], args)
+
 
 
 # ═══════════════════════════════════════════════════════
@@ -2069,7 +1460,7 @@ def main():
     p.add_argument("--refresh", action="store_true", help="探测前刷新 PS_TOKEN")
 
     # healthcheck
-    p = sub.add_parser("healthcheck", help="只读验证认证与全部元数据操作")
+    p = sub.add_parser("healthcheck", help="无数据写入地验证认证及必需操作；SQL 写操作可选")
     p.add_argument("--refresh", action="store_true", help="探测前刷新 PS_TOKEN")
     p.add_argument("--project", default="C_META_DATA_PKG")
     p.add_argument("--package-root", default="C_META_DATA_PKG")
@@ -2081,11 +1472,12 @@ def main():
     p.add_argument("--query-field", default="EMPLID")
     p.add_argument("--ae-id", default="__PS_METADATA_PROBE__")
     p.add_argument("--sql-id", default="__PS_METADATA_PROBE__")
+    p.add_argument("--include-sql-write", action="store_true", help="额外用空 SQL 验证写操作授权，不执行 DML")
 
     # environment
     p = sub.add_parser("env", help="列出、切换或初始化 PeopleSoft 环境")
-    p.add_argument("op", choices=["list", "current", "use", "init"])
-    p.add_argument("name", nargs="?", help="use 或 init 的环境名")
+    p.add_argument("op", choices=["list", "current", "use", "init", "layout"])
+    p.add_argument("name", nargs="?", help="use/init 的环境名；layout 的 split 或 legacy")
     p.add_argument("--auth", action="store_true", help="切换或初始化后刷新 PS_TOKEN")
     p.add_argument("--url", dest="pia_url", help="env init 的 PIA 地址")
     p.add_argument("--username", help="env init 的 PeopleSoft 用户名")
@@ -2102,32 +1494,45 @@ def main():
 
     # app-pkg
     p = sub.add_parser("app-pkg", help="维护应用包")
-    p.add_argument("op", choices=["struct", "view-code", "modify-code", "delete-code", "insert-class", "insert-package"])
+    p.add_argument("op", choices=["struct", "view-code", "modify-code", "delete-code", "insert-class", "insert-package", "delete-class", "delete-package", "delete-root"])
     p.add_argument("pkg")
     p.add_argument("classpath", nargs="?")
     p.add_argument("file", nargs="?")
 
-    p.add_argument("--project", help="delete-code 迁移登记工程，默认当前工程")
-    p.add_argument("--dry-run", action="store_true", help="验证完整程序键和快照，不删除或登记")
-    p.add_argument("--output", help="保存 delete-code 验证结果 JSON")
+    p.add_argument("--snapshot", help="先前 struct/view-code 生成的版本快照 JSON")
+    p.add_argument("--json", action="store_true", help="struct 返回完整树与原生版本信息")
+    p.add_argument("--project", help="写操作迁移登记工程，默认当前工程")
+    p.add_argument("--dry-run", action="store_true", help="返回删除计划，不删除定义或登记工程")
+    p.add_argument("--output", help="保存写入或删除结果 JSON")
 
     # sql
-    p = sub.add_parser("sql", help="维护 SQL 定义")
-    p.add_argument("op", choices=["view", "create", "modify"])
-    p.add_argument("sqlid")
+    p = sub.add_parser("sql", help="维护 SQL 定义或执行单条 SQL")
+    p.add_argument("op", choices=["view", "create", "modify", "exec", "run", "write"])
+    p.add_argument("--snapshot", help="SQL 定义原始结构或 Statement 工作副本快照")
+    p.add_argument("--json", action="store_true", help="输出 SQL 定义及完整快照 JSON")
+    p.add_argument("--descr", help="SQL Statement 描述")
+    p.add_argument("--dry-run", action="store_true", help="校验并回滚定义写入，不执行 SQL")
+    p.add_argument("sqlid", nargs="?")
     p.add_argument("--market", default="GBL")
     p.add_argument("--dbtype", default="")
     p.add_argument("--effdt", default="1900-01-01")
     p.add_argument("--sqltext-file")
     p.add_argument("--comment-file")
     p.add_argument("file", nargs="?")
+    p.add_argument("--sql", help="exec/write 的 SQL 文本")
+    p.add_argument("--file", dest="sql_file", help="exec/write 的 UTF-8 SQL 文件")
+    p.add_argument("--bind", default="[]", help="执行参数，JSON 字符串数组")
+    p.add_argument("--max-rows", type=int, help="查询返回行数上限，1..1000，默认 200")
+    p.add_argument("--columns", help="列名标签，JSON 字符串数组")
+    p.add_argument("--allow-all-rows", action="store_true", help="明确允许无外层 WHERE 的 UPDATE/DELETE")
+    p.add_argument("--output", help="保存完整执行结果 JSON")
 
     # ae
     p = sub.add_parser("ae", help="维护 AE 定义")
     p.add_argument("op", choices=[
         "struct", "create", "insert-section", "insert-step", "insert-action",
         "view-sql", "modify-sql", "view-code", "modify-code", "delete-code",
-        "insert-state-record", "insert-temp-table"
+        "insert-state-record", "insert-temp-table", "delete-section", "delete-step", "delete-action"
     ])
     p.add_argument("aeid")
     p.add_argument("--sectionid")
@@ -2140,14 +1545,18 @@ def main():
     p.add_argument("--comment")
     p.add_argument("--recname")
     p.add_argument("file", nargs="?")
+    p.add_argument("--file", dest="input_file", help="UTF-8 正文文件；兼容原位置参数")
+    p.add_argument("--snapshot", help="AE 原始结构、代码或 SQL 快照")
+    p.add_argument("--json", action="store_true", help="输出完整 JSON")
+    p.add_argument("--is-default", choices=["Y", "N"], default="N", help="State Record 是否默认")
 
-    p.add_argument("--project", help="delete-code 迁移登记工程，默认当前工程")
-    p.add_argument("--dry-run", action="store_true", help="验证完整程序键和快照，不删除或登记")
-    p.add_argument("--output", help="保存 delete-code 验证结果 JSON")
+    p.add_argument("--project", help="AE 写入登记工程，默认当前工程")
+    p.add_argument("--dry-run", action="store_true", help="验证删除范围和原始版本，不删除或登记")
+    p.add_argument("--output", help="保存 AE 结构快照或写入验证结果 JSON")
 
     # component
     p = sub.add_parser("component", help="维护 Component 定义")
-    p.add_argument("op", choices=["struct", "structDeep", "view-code", "modify-code", "delete-code"])
+    p.add_argument("op", choices=["struct", "structDeep", "modify-props", "view-code", "modify-code", "delete-code"])
     p.add_argument("pnlgrpname")
     p.add_argument("--market", default="")
     p.add_argument("--deep", action="store_true", help="显示 Page → 层级 → Record → Field 结构")
@@ -2156,21 +1565,82 @@ def main():
     p.add_argument("--event")
     p.add_argument("--file")
 
-    p.add_argument("--project", help="delete-code 迁移登记工程，默认当前工程")
+    p.add_argument("--snapshot", help="原始 Component 结构或代码快照")
+    p.add_argument("--json", action="store_true", help="输出完整 JSON")
+    p.add_argument("--descr")
+    p.add_argument("--comment")
+    p.add_argument("--search-record")
+    p.add_argument("--add-search-record")
+    p.add_argument("--allow-add", type=int, choices=[0, 1])
+    p.add_argument("--allow-update", type=int, choices=[0, 1])
+    p.add_argument("--allow-update-all", type=int, choices=[0, 1])
+    p.add_argument("--allow-correction", type=int, choices=[0, 1])
+    p.add_argument("--primary-action", choices=["new", "search", "keyword-search"], help="Internet: 主操作")
+    p.add_argument("--default-search-action", choices=["update-display", "update-display-all", "correction"], help="Internet: 已启用的默认搜索动作")
+    p.add_argument("--default-search-type", choices=["basic", "advanced", "keyword-only"], help="Internet: 默认搜索/查找类型")
+    p.add_argument("--display-folder-tabs", type=int, choices=[0, 1], help="Internet: 顶部文件夹标签")
+    p.add_argument("--display-hyperlinks", type=int, choices=[0, 1], help="Internet: 底部超链接")
+    p.add_argument("--page-navigation-in-history", type=int, choices=[0, 1], help="Internet: 历史页面导航；开启时联动 Return=1")
+    p.add_argument("--return-to-last-page-in-history", type=int, choices=[0, 1], help="Internet: 返回历史最后页面")
+    p.add_argument("--toolbar-save", type=int, choices=[0, 1], help="Internet: toolbarSave")
+    p.add_argument("--toolbar-cancel", type=int, choices=[0, 1], help="Internet: toolbarCancel")
+    p.add_argument("--toolbar-spell-check", type=int, choices=[0, 1], help="Internet: toolbarSpellCheck")
+    p.add_argument("--toolbar-return-to-list", type=int, choices=[0, 1], help="Internet: toolbarReturnToList")
+    p.add_argument("--toolbar-next-in-list", type=int, choices=[0, 1], help="Internet: toolbarNextInList")
+    p.add_argument("--toolbar-previous-in-list", type=int, choices=[0, 1], help="Internet: toolbarPreviousInList")
+    p.add_argument("--toolbar-next-page", type=int, choices=[0, 1], help="Internet: toolbarNextPage")
+    p.add_argument("--toolbar-previous-page", type=int, choices=[0, 1], help="Internet: toolbarPreviousPage")
+    p.add_argument("--toolbar-hide-back-button", type=int, choices=[0, 1], help="Internet: toolbarHideBackButton")
+    p.add_argument("--toolbar-refresh", type=int, choices=[0, 1], help="Internet: toolbarRefresh")
+    p.add_argument("--toolbar-notify", type=int, choices=[0, 1], help="Internet: toolbarNotify")
+    p.add_argument("--toolbar-view-worklist", type=int, choices=[0, 1], help="Internet: toolbarViewWorklist")
+    p.add_argument("--toolbar-next-in-worklist", type=int, choices=[0, 1], help="Internet: toolbarNextInWorklist")
+    p.add_argument("--toolbar-previous-in-worklist", type=int, choices=[0, 1], help="Internet: toolbarPreviousInWorklist")
+    p.add_argument("--toolbar-add", type=int, choices=[0, 1], help="Internet: toolbarAdd")
+    p.add_argument("--toolbar-update-display", type=int, choices=[0, 1], help="Internet: toolbarUpdateDisplay")
+    p.add_argument("--toolbar-update-display-all", type=int, choices=[0, 1], help="Internet: toolbarUpdateDisplayAll")
+    p.add_argument("--toolbar-correction", type=int, choices=[0, 1], help="Internet: toolbarCorrection")
+    p.add_argument("--disable-toolbar", type=int, choices=[0, 1], help="Internet: disableToolbar")
+    p.add_argument("--disable-pagebar", type=int, choices=[0, 1], help="Internet: disablePagebar")
+    p.add_argument("--pagebar-help-link", type=int, choices=[0, 1], help="Internet: pagebarHelpLink")
+    p.add_argument("--pagebar-copy-url-link", type=int, choices=[0, 1], help="Internet: pagebarCopyUrlLink")
+    p.add_argument("--pagebar-new-window-link", type=int, choices=[0, 1], help="Internet: pagebarNewWindowLink")
+    p.add_argument("--pagebar-customize-page-link", type=int, choices=[0, 1], help="Internet: pagebarCustomizePageLink")
+    p.add_argument("--page-name")
+    p.add_argument("--hidden", type=int, choices=[0, 1])
+    p.add_argument("--item-label")
+    p.add_argument("--folder-tab-label")
+    p.add_argument("--project", help="Component 写入登记工程，默认当前工程")
     p.add_argument("--dry-run", action="store_true", help="验证完整程序键和快照，不删除或登记")
-    p.add_argument("--output", help="保存 delete-code 验证结果 JSON")
+    p.add_argument("--output", help="保存 Component 结构快照或写入验证结果 JSON")
 
     # record
     p = sub.add_parser("record", help="维护 Record 定义")
-    p.add_argument("op", choices=["struct", "create", "modify", "build", "alter", "create-view", "view-sql", "modify-sql", "view-code", "modify-code", "delete-code"])
+    p.add_argument("op", choices=["struct", "create", "modify", "build", "alter", "create-view", "view-sql", "modify-sql", "view-code", "modify-code", "delete-code", "delete", "delete-field"])
     p.add_argument("recname")
     p.add_argument("file", nargs="?")
     p.add_argument("--fieldname")
     p.add_argument("--event")
 
-    p.add_argument("--project", help="delete-code 迁移登记工程，默认当前工程")
-    p.add_argument("--dry-run", action="store_true", help="验证完整程序键和快照，不删除或登记")
-    p.add_argument("--output", help="保存 delete-code 验证结果 JSON")
+    p.add_argument("--project", help="写后迁移登记工程，默认当前工程")
+    p.add_argument("--dry-run", action="store_true", help="只核对定义/字段/程序删除计划，不删除或登记")
+    p.add_argument("--output", help="保存写入或删除的验证结果 JSON")
+
+    p.add_argument("--snapshot", help="读取时的版本快照；代码/SQL 默认使用输入文件旁的 .snapshot.json")
+    p.add_argument("--json", action="store_true", help="输出结构 JSON 与版本快照路径")
+
+    # field
+    p = sub.add_parser("field", help="维护 Field 定义、版本快照及明确删除")
+    p.add_argument("op", choices=["struct", "create", "modify", "delete", "delete-label"])
+    p.add_argument("name")
+    p.add_argument("file", nargs="?")
+    p.add_argument("--label-id", help="delete-label 要删除的 Label ID")
+    p.add_argument("--replacement-label-id", help="删除默认 Label 时指定已有替代标签")
+    p.add_argument("--snapshot", help="struct 返回的版本快照")
+    p.add_argument("--project", help="写后登记工程，默认当前工程")
+    p.add_argument("--dry-run", action="store_true", help="只核对删除计划，不删除或登记")
+    p.add_argument("--output", help="保存验证结果 JSON")
+    p.add_argument("--json", action="store_true", help="输出结构 JSON")
 
     # query-record
     p = sub.add_parser("query-record", help="查询业务数据（AI_QUERY_RECORD_POST）")
@@ -2183,6 +1653,9 @@ def main():
     p = sub.add_parser("project", help="维护 Project 定义（AI_OPER_PROJECT_DEFN_POST）")
     p.add_argument("op", choices=["create", "insert-item", "update-item", "delete-item", "modify", "struct", "use", "current"])
     p.add_argument("projectname", nargs="?", help="Project 名称；current 时省略")
+    p.add_argument("--snapshot", help="project struct 生成的原始快照")
+    p.add_argument("--dry-run", action="store_true", help="校验并回滚 Project 写入")
+    p.add_argument("--output", help="保存结果或可复用的结构快照 JSON")
     p.add_argument("--descr")
     p.add_argument("--comment")
     p.add_argument("--object-type", type=int)
@@ -2194,7 +1667,7 @@ def main():
         p.add_argument(f"--id{i}", type=int, help="从 Project 结构取得的完整 ObjectID，仅用于更新/删除")
     group = p.add_mutually_exclusive_group()
     group.add_argument("--action", dest="upgrade_action", type=_parse_project_action,
-                       metavar="Copy|Delete|CopyProp", help="Project 条目 Action，不区分大小写；CopyProp 仅适用 Record/Field")
+                       metavar="Copy|Delete|CopyProp", help="Project 条目 Action，不区分大小写；CopyProp 的已验证复制语义见 Project 文档")
     group.add_argument("--upgrade-action", type=int, choices=[0, 1, 2, 3],
                        help="Action 数字编码：0=Copy，1=Delete，2=None（历史兼容），3=CopyProp")
     group = p.add_mutually_exclusive_group()
@@ -2206,12 +1679,13 @@ def main():
                        metavar="on|off", help="Done 标记，仅 update-item；省略则保留")
     group.add_argument("--copy-done", type=int, choices=[0, 1], help="Done 数字编码：0/1，仅 update-item")
     p.add_argument("--json", action="store_true", help="以 JSON 输出 Project 结构")
+    p.add_argument("--ad-defaults", action="store_true", help="modify 时显式恢复 AD 比较/报告/提交选项；不改成员或描述")
 
     # page
     p = sub.add_parser("page", help="维护 Page 定义（AI_OPER_PAGE_DEFN_POST）")
     p.add_argument("op", choices=["struct", "view-code", "modify-code", "delete-code", "create", "modify-props", "add-control", "del-control", "find", "mod-control"])
     p.add_argument("pagename")
-    p.add_argument("--control-type", help="editBox|dropDown|checkBox|staticText|groupBox|hrule|subPage|scrollArea|htmlArea|pushButton|hyperlink")
+    p.add_argument("--control-type", choices=["editBox", "dropDown"], help="本批仅支持已验证的Edit Box/Drop-Down")
     p.add_argument("--rec")
     p.add_argument("--field")
     p.add_argument("--label-text")
@@ -2220,8 +1694,8 @@ def main():
     p.add_argument("--top", type=int)
     p.add_argument("--right", type=int)
     p.add_argument("--bottom", type=int)
-    p.add_argument("--occurs-level", type=int)
-    p.add_argument("--required", type=int)
+    p.add_argument("--occurs-level", type=int, help="新增仅支持0；不开放已有控件层级变更")
+    p.add_argument("--required", type=int, help="已停用：Page只读位不代表Required；传入将拒绝写入")
     p.add_argument("--invisible", type=int)
     p.add_argument("--display-only", type=int)
     p.add_argument("--pnl-fld-id", type=int)
@@ -2231,24 +1705,59 @@ def main():
     p.add_argument("--defer-proc", type=int)
     p.add_argument("--panel-right", type=int)
     p.add_argument("--panel-bottom", type=int)
-    p.add_argument("--on-value")
-    p.add_argument("--off-value")
-    p.add_argument("--sub-pnl-name")
-    p.add_argument("--html-text")
-    p.add_argument("--pb-display-type", type=int)
     p.add_argument("--field-type", type=int, help="findControls 的数值 FIELDTYPE 过滤，例如 4=editBox、27=scrollArea")
-    p.add_argument("--edit-size", type=int)
     p.add_argument("--label-type", type=int)
     p.add_argument("--label-loc", type=int)
     p.add_argument("--field-style")
     p.add_argument("--label-style")
+    p.add_argument("--display-control", type=int, choices=[0, 1])
+    p.add_argument("--multi-currency", type=int, choices=[0, 1])
+    p.add_argument("--set-component-changed", type=int, choices=[0, 1])
+    p.add_argument("--display-only-appearance", choices=["textOnly", "disabled"])
+    p.add_argument("--read-only-screen-reader", type=int, choices=[0, 1])
+    p.add_argument("--page-field-name", help="mod-control 的 Page Field Name；空字符串清除")
+    p.add_argument("--enable-as-anchor", type=int, choices=[0, 1])
+    p.add_argument("--alignment", choices=["auto", "left", "right"], help="Edit Box 对齐")
+    p.add_argument("--fill-character", help="Edit Box 填充字符；空字符串清除")
+    p.add_argument("--password", type=int, choices=[0, 1])
+    p.add_argument("--input-only", type=int, choices=[0, 1])
+    p.add_argument("--show-prompt-button", type=int, choices=[0, 1])
+    p.add_argument("--auto-fill", type=int, choices=[0, 1])
+    p.add_argument("--spell-check", type=int, choices=[0, 1])
+    p.add_argument("--no-colon", type=int, choices=[0, 1])
+    p.add_argument("--first-occurs-only", type=int, choices=[0, 1])
+    p.add_argument("--label-alignment", choices=["left", "center", "right"])
+    p.add_argument("--use-default-label", type=int, choices=[0, 1])
+    p.add_argument("--displayed-text", choices=["xlatShort", "xlatLong", "prompt"])
+    p.add_argument("--prompt-field")
+    p.add_argument("--label-position", choices=["left", "custom", "top"])
+    p.add_argument("--label-left", type=int)
+    p.add_argument("--label-top", type=int)
+    p.add_argument("--label-right", type=int)
+    p.add_argument("--label-bottom", type=int)
+    p.add_argument("--move-x", type=int)
+    p.add_argument("--move-y", type=int)
+    p.add_argument("--size-type", choices=["average", "maximum", "custom"])
+    p.add_argument("--show-label", type=int, choices=[0, 1])
+    p.add_argument("--enable-when-page-display-only", type=int, choices=[0, 1])
+    p.add_argument("--wrap-long-words", type=int, choices=[0, 1])
+    p.add_argument("--modifiable-by-javascript", type=int, choices=[0, 1])
+    p.add_argument("--generate-html", type=int, choices=[0, 1])
+    p.add_argument("--auto-decimal", type=int, choices=[0, 1])
+    p.add_argument("--currency-symbol", type=int, choices=[0, 1])
+    p.add_argument("--thousands-separator", type=int, choices=[0, 1])
+    p.add_argument("--display-zero", type=int, choices=[0, 1])
+    p.add_argument("--show-century", type=int, choices=[0, 1])
+    p.add_argument("--show-time-zone", type=int, choices=[0, 1])
+    p.add_argument("--popup-menu")
+    p.add_argument("--snapshot", help="Page 原始结构或 Activate 代码版本快照")
     p.add_argument("--full", action="store_true", help="包含可用的 PSPNLDEFN/PSPNLFIELD 原始列")
     p.add_argument("--json", action="store_true", help="输出原始 JSON 响应")
     p.add_argument("--file")
 
-    p.add_argument("--project", help="delete-code 迁移登记工程，默认当前工程")
+    p.add_argument("--project", help="Page 写入登记工程，默认当前工程")
     p.add_argument("--dry-run", action="store_true", help="验证完整程序键和快照，不删除或登记")
-    p.add_argument("--output", help="保存 delete-code 验证结果 JSON")
+    p.add_argument("--output", help="保存 Page 结构快照或写入验证结果 JSON")
 
     # get-field
     p = sub.add_parser("get-field", help="批量查询 Field 定义（AI_OPER_FIELD_DEFN_POST）")
@@ -2283,7 +1792,7 @@ def main():
 
 
 def _dispatch(args):
-    if args.cmd in ("service", "service-op", "menu", "message-catalog", "portal"):
+    if args.cmd in ("service", "service-op", "menu", "message-catalog", "portal", "html", "stylesheet", "ci"):
         from object_operations import execute
         return execute(sys.modules[__name__], args)
     if hasattr(args, "dbtype"):
@@ -2306,8 +1815,9 @@ def _dispatch(args):
         cmd_ae(args)
     elif args.cmd == "component":
         cmd_component(args)
-    elif args.cmd == "record":
-        cmd_record(args)
+    elif args.cmd in ("record", "field"):
+        from definition_operations import execute
+        execute(sys.modules[__name__], args)
     elif args.cmd == "query-record":
         cmd_query_record(args)
     elif args.cmd == "project":

@@ -1,5 +1,6 @@
-"""服务、菜单、消息目录与门户命令；写入均使用已认证的 IB API。"""
+"""PeopleSoft 定义维护与列表命令；写入均使用已认证的 IB API。"""
 import json
+import time
 from pathlib import Path
 
 ENDPOINTS = {
@@ -8,31 +9,50 @@ ENDPOINTS = {
     "menu": "AI_OPER_MENU_DEFN.v1/",
     "message-catalog": "AI_OPER_MESSAGE_CATALOG.v1/",
     "portal": "AI_OPER_PORTAL_REGISTRY.v1/",
+    "html": "AI_OPER_HTML_DEFN.v1/",
+    "stylesheet": "AI_OPER_STYLESHEET_DEFN.v1/",
+    "ci": "AI_OPER_CI_DEFN.v1/",
 }
 KINDS = {"service": "service", "service-op": "operation", "menu": "menu",
-         "message-catalog": "catalog", "portal": "portal"}
+         "message-catalog": "catalog", "portal": "portal", "html": "html",
+         "stylesheet": "stylesheet", "ci": "ci"}
 TYPES = {"service": 79, "operation": 80, "version": 82, "handler": 81,
-         "routing": 83, "menu": 6, "catalog": 25, "portal": 55}
-READS = {"struct", "view", "exists", "view-code", "view-permission", "plan-delete", "validate", "tree"}
+         "routing": 83, "menu": 6, "catalog": 25, "portal": 55,
+         "html": 51, "stylesheet": 50, "ci": 32}
+READS = {"struct", "view", "exists", "view-code", "view-permission", "plan-delete", "plan-configure", "validate", "tree", "wsdl"}
 
 
 def add_parsers(sub):
-    common = ["struct", "exists", "create", "modify"]
+    common = ["list", "struct", "exists", "create", "modify"]
     for command, choices in {
-        "service": common,
-        "service-op": common + ["delete", "delete-child", "plan-delete", "view-permission", "set-permission", "configure-rest", "validate"],
+        "service": common + ["wsdl", "plan-delete", "delete"],
+        "service-op": common + ["delete", "delete-child", "plan-delete", "plan-configure", "view-permission", "set-permission", "configure-rest", "configure-soap", "validate"],
         "menu": common + ["delete-item", "view-code", "modify-code", "delete-code"],
-        "message-catalog": ["view", "struct", "exists", "create-set", "create", "modify", "delete"],
+        "message-catalog": ["list", "view", "struct", "exists", "create-set", "create", "modify", "delete"],
         "portal": common + ["validate", "tree", "move", "delete", "set-attribute", "delete-attribute", "set-permission", "delete-permission"],
+        "html": common,
+        "stylesheet": common,
+        "ci": common + ["delete-item", "view-code", "modify-code", "delete-code"],
     }.items():
         p = sub.add_parser(command, help=f"读取、新增和修改 {command} 定义")
         p.add_argument("op", choices=choices)
-        p.add_argument("name", help="定义名；message-catalog 使用消息集号")
+        p.add_argument("name", nargs="?", default="", help="定义名；list 使用名称前缀，省略则列出全部；消息目录使用消息集号")
+        p.add_argument("--limit", type=int, default=50, help="list 每页 1..200 条")
+        p.add_argument("--after", default="", help="list 下一页：上次结果的 nextAfter")
         p.add_argument("--file", help="UTF-8 JSON 补丁文件；modify-code 使用 PeopleCode 文本")
         p.add_argument("--project", help="已确认的工作 Project；默认使用当前环境的活动项目")
         p.add_argument("--dry-run", action="store_true", help="验证并返回计划，不保存")
         p.add_argument("--snapshot", help="先前读取的 JSON 快照；状态变化时拒绝保存")
         p.add_argument("--output", help="将完整 JSON 结果保存到文件")
+        if command in ("html", "stylesheet"):
+            p.add_argument("--content-file", help="UTF-8 HTML/CSS 正文；允许显式空文件")
+            p.add_argument("--descr", help="定义描述")
+        if command == "service":
+            p.add_argument("--operation", help="生成 WSDL 的所属 SOAP Operation")
+            p.add_argument("--version", help="WSDL 使用的操作版本；默认使用该操作的默认版本")
+            p.add_argument("--secure", action="store_true", help="WSDL 使用已配置的安全目标地址")
+            p.add_argument("--wsdl-file", help="将生成的 WSDL XML 保存为 UTF-8 文件")
+            p.add_argument("--endpoint", help="仅替换本次导出的 SOAP 地址，不修改服务器全局配置")
         if command == "service-op":
             p.add_argument("--kind", choices=["operation", "version", "handler", "routing"], default="operation")
             p.add_argument("--version")
@@ -45,6 +65,7 @@ def add_parsers(sub):
             p.add_argument("--item")
         elif command == "message-catalog":
             p.add_argument("--number", type=int)
+            p.add_argument("--language", help="独立翻译的 PeopleSoft 语言代码，例如 ENG；基准语言不传此选项")
             p.add_argument("--text")
             p.add_argument("--text-file")
             p.add_argument("--explanation-file")
@@ -93,6 +114,14 @@ def _document(api, spec):
 def _identity(api, args):
     kind = getattr(args, "kind", KINDS[args.cmd])
     keys = {"kind": kind, "name": args.name}
+    if args.cmd == "message-catalog" and args.language:
+        keys["language"] = args.language
+        if args.number is not None:
+            keys["messageNumber"] = args.number
+        if args.op == "create-set":
+            _error(api, "--language requires an existing base message; create-set maintains base messages only.")
+        if args.op in ("create", "modify", "delete", "exists") and args.number is None:
+            _error(api, "Translation operations require an exact --number.")
     if kind == "version":
         if not args.version:
             _error(api, "--version is required for version definitions.")
@@ -126,6 +155,14 @@ def _patch(api, args):
     for name, rows in colls.items():
         if not isinstance(rows, list) or any(not isinstance(row, dict) or any(v is None for v in row.values()) for row in rows):
             _error(api, f"Collection {name} must be an array of non-null object patches.")
+    if args.cmd in ("html", "stylesheet"):
+        if args.content_file is not None:
+            field = "ContStrData" if args.cmd == "html" else "ExtStyleSheetStr"
+            if field in props:
+                _error(api, f"{field} is supplied in both --file and --content-file.")
+            props[field] = _read_file(api, args.content_file)
+        if args.descr is not None:
+            props["Descr"] = args.descr
     if args.cmd == "message-catalog":
         for attr, field in (("text", "text"), ("severity", "severity"), ("descr", "descr"), ("descr_short", "descrShort")):
             if getattr(args, attr) is not None:
@@ -190,13 +227,15 @@ def _project(api, args):
     name = args.project or api._active_project()
     if not name:
         _error(api, "Choose a confirmed --project or run project use before writing.")
-    return name, api._api_call("AI_OPER_PROJECT_DEFN.v1/", {"projectName": name, "operationType": "struct"})
+    return name, api._require_project(name)
 
 
 def _project_values(keys, result, code=False):
     kind = keys["kind"]
     values = [keys["name"]]
     if code:
+        if kind == "ci":
+            return 42, values + ["Methods"]
         return 9, values + [keys["BarName"], keys["ItemName"], "ItemSelected"]
     if kind == "permission":
         # Permission List security rows are data, not AD Project definitions.
@@ -211,41 +250,13 @@ def _project_values(keys, result, code=False):
         values.append(str(result["messageNumber"]))
     elif kind == "portal":
         values = [keys["PortalName"], keys["RefType"], keys["name"]]
+    elif kind == "html":
+        values.append("4")
     return TYPES[kind], values
 
 
 def _register(api, project, typ, values, deleted=False):
-    def read():
-        return api._api_call("AI_OPER_PROJECT_DEFN.v1/", {"projectName": project, "operationType": "struct"})["items"]
-    padded = values + [""] * (4 - len(values))
-    def match(items):
-        return [x for x in items if int(x["objectType"]) == typ and
-                [(x.get(f"objectValue{i}") or "").rstrip() for i in range(1, 5)] == padded]
-    matches = match(read())
-    if len(matches) > 1:
-        _error(api, "Ambiguous Project item; inspect native IDs before continuing.")
-    if not matches:
-        api._api_call("AI_OPER_PROJECT_DEFN.v1/", dict(projectName=project, operationType="insertItem",
-            objectType=typ, takeAction=1, upgradeAction=1 if deleted else 0,
-            **{f"objectValue{i + 1}": v for i, v in enumerate(padded)}))
-        matches = match(read())
-    if len(matches) != 1:
-        _error(api, "Saved definition could not be registered in the work Project.")
-    row = matches[0]
-    flags = {"copyDone": 0}
-    if deleted:
-        flags.update(upgradeAction=1, takeAction=1)
-    elif row.get("upgradeAction") == 1:
-        # A recreated definition must no longer be marked for deletion.
-        flags["upgradeAction"] = 0
-    if any(row.get(k) != v for k, v in flags.items()):
-        api._api_call("AI_OPER_PROJECT_DEFN.v1/", dict(projectName=project, operationType="updateItem",
-            objectType=typ, **flags,
-            **{f"objectId{i}": row[f"objectId{i}"] for i in range(1, 5)},
-            **{f"objectValue{i}": row[f"objectValue{i}"] for i in range(1, 5)}))
-        after = match(read())
-        if len(after) != 1 or any(after[0].get(k) != v for k, v in flags.items()):
-            _error(api, "Project migration flag readback failed.")
+    api._insert_project_item(project, typ, values, action=1 if deleted else 0, take_action=1)
 
 
 def _verify(api, actual, patch, deleted_child=False):
@@ -257,7 +268,7 @@ def _verify(api, actual, patch, deleted_child=False):
         "Operationversion": ("Versionname",), "Oprverdfnparm": ("Parametername",),
         "Oprvgenrtgparm": ("Parametername",), "Operationac": ("Classname",),
         "Ibrtngsubdefn": ("Seqnum",), "Rtngdfnparm": ("Parametername",),
-        "Attr": ("AttrName",), "Permission": ("PermType", "PermName")}
+        "Attr": ("AttrName",), "Permission": ("PermType", "PermName"), "Pit": ("Seq",)}
     for collection, rows in patch.get("collections", {}).items():
         if collection not in child_keys:
             _error(api, f"No verification schema for {collection}.")
@@ -278,6 +289,45 @@ def _output(api, args, result):
         path = Path(args.output).resolve()
         api._write_json_atomic(path, result)
     print(text)
+    return result
+
+
+def _write_wsdl(api, args, result):
+    """Export native WSDL and its message schemas without changing IB settings."""
+    import re
+    from urllib.parse import urlsplit
+    from xml.dom import minidom
+    doc = minidom.parseString(result["wsdl"])
+    if args.endpoint:
+        url = urlsplit(args.endpoint)
+        if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password:
+            _error(api, "--endpoint requires an HTTP(S) URL without embedded credentials.")
+        for node in doc.getElementsByTagNameNS("http://schemas.xmlsoap.org/wsdl/soap/", "address"):
+            node.setAttribute("location", args.endpoint)
+    if args.wsdl_file:
+        path = Path(args.wsdl_file).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        schemas = {}
+        for schema in result.get("schemas", []):
+            key = schema["namespace"]
+            if key in schemas and schemas[key] != schema["xml"]:
+                _error(api, "Different message schemas share one namespace; export requires distinct namespaces.")
+            schemas[key] = schema["xml"]
+        exported = {}
+        for index, (namespace, xml) in enumerate(schemas.items(), 1):
+            minidom.parseString(xml)
+            filename = re.sub(r"[^A-Za-z0-9_.-]", "_", path.stem) + f".schema-{index}.xsd"
+            (path.parent / filename).write_text(xml, encoding="utf-8")
+            exported[namespace] = filename
+        for node in doc.getElementsByTagNameNS("http://www.w3.org/2001/XMLSchema", "import"):
+            if node.getAttribute("namespace") in exported:
+                node.setAttribute("schemaLocation", exported[node.getAttribute("namespace")])
+        result["schemaFiles"] = list(exported.values())
+        result["wsdlPath"] = str(path)
+        result["wsdl"] = doc.toxml()
+        path.write_text(result["wsdl"], encoding="utf-8")
+    elif args.endpoint:
+        result["wsdl"] = doc.toxml()
 
 
 def _catalog_verify(api, args, result, patch, actual):
@@ -288,6 +338,22 @@ def _catalog_verify(api, args, result, patch, actual):
     number = result["messageNumber"]
     if number:
         rows = [r for r in actual["messages"] if r["messageNumber"] == number]
+        if args.language:
+            before = result["before"]
+            def base_state(snapshot):
+                return {"descr": snapshot["descr"], "descrShort": snapshot["descrShort"],
+                    "messages": [{k:r[k] for k in ("messageNumber", "baseText", "baseExplanation", "severity")}
+                                 for r in snapshot["messages"]]}
+            def other_translations(snapshot):
+                return [r for r in snapshot["allTranslations"]
+                        if (r["messageNumber"], r["language"]) != (number, args.language)]
+            if base_state(before) != base_state(actual) or other_translations(before) != other_translations(actual):
+                _error(api, "Base messages or other translations changed during translation save; inspect current state.")
+            if len(rows) != 1 or rows[0]["translationExists"] != (args.op != "delete"):
+                _error(api, "Translation existence readback differs; the base message must remain present.")
+            if args.op != "delete" and any(rows[0].get(k) != v for k, v in props.items()):
+                _error(api, "Translation text/explanation readback differs.")
+            return
         if args.op == "delete":
             if rows:
                 _error(api, "Deleted message still exists.")
@@ -299,129 +365,106 @@ def _catalog_verify(api, args, result, patch, actual):
                 _error(api, "Message readback differs from the requested text/severity.")
 
 
+def _require_translation_snapshot(api, language, snapshot):
+    if (snapshot.get("language") != language or not snapshot.get("baseLanguage")
+            or snapshot["baseLanguage"] == language
+            or not isinstance(snapshot.get("allTranslations"), list)
+            or not isinstance(snapshot.get("messages"), list)
+            or any(not all(k in row for k in ("baseText", "baseExplanation", "severity"))
+                   or type(row.get("translationExists")) is not bool for row in snapshot["messages"])):
+        _error(api, "Server/snapshot lacks independent translation support; deploy the complete dev.4 server project before using --language.")
+
+
+class _WriteJournal:
+    """记录已收到响应的写请求；失败时不猜测回滚、不自动重试。"""
+    def __init__(self, api):
+        self._api = api
+        self.completed = []
+        self.current = None
+        self.attempted = False
+        self.project = None
+        self.snapshots = []
+
+    def __getattr__(self, name):
+        return getattr(self._api, name)
+
+    def _api_call(self, endpoint, payload):
+        action = payload.get("operationType", "view")
+        if payload.get("projectName"):
+            self.project = payload["projectName"]
+        reads = {"view", "struct", "exists", "viewCode", "validate", "wsdl"}
+        writing = action not in reads and not payload.get("dryRun")
+        identity = {k:payload[k] for k in ("kind", "name", "Versionname", "Handlername", "Effdt",
+            "PortalName", "RefType", "permissionList", "messageNumber", "language", "BarName", "ItemName", "projectName",
+            "objectType", *[f"objectId{i}" for i in range(1,5)], *[f"objectValue{i}" for i in range(1,5)]) if k in payload}
+        if writing:
+            self.attempted = True
+        self.current = dict(endpoint=endpoint, operationType=action, keys=identity,
+            phase="projectRegistration" if endpoint == "AI_OPER_PROJECT_DEFN.v1/" else "save" if writing else "readback",
+            outcome="unknown")
+        result = self._api._api_call(endpoint, payload)
+        if writing:
+            self.current["outcome"] = "acknowledged"
+            self.completed.append(dict(self.current))
+        else:
+            self.current["outcome"] = "returned"
+        return result
+
+
 def execute(api, args):
-    if args.cmd == "service-op" and args.op == "configure-rest":
-        return _configure_rest(api, args)
-    keys = _identity(api, args)
-    endpoint = ENDPOINTS[args.cmd]
-    def call(action, **extra):
-        return api._api_call(endpoint, dict(keys, operationType=action, **extra))
-    if args.op == "validate":
+    if args.op in READS or args.op == "list" or args.dry_run:
+        return _execute(api, args)
+    journal = _WriteJournal(api)
+    errors = (api.PSAPIError, getattr(api, "PSAuthError", api.PSAPIError))
+    try:
+        return _execute(journal, args)
+    except errors as exc:
+        if args.cmd in ("ci", "menu", "html", "stylesheet", "service", "service-op", "message-catalog", "portal") and getattr(exc, "code", None) == 409 and not journal.completed:
+            raise
+        if journal.attempted:
+            report = dict(environment=api.ENVIRONMENT, verified=False, status="incomplete",
+                workflow=f"{args.cmd} {args.op}", name=args.name, project=journal.project or args.project,
+                completedWrites=journal.completed, lastRequest=journal.current,
+                recoverySnapshots=journal.snapshots,
+                error=str(exc), recovery="先独立回读目标定义、关联和 Project；确认已保存状态后，只补做未完成步骤。未自动回滚或重试；acknowledged 仅表示收到写入响应，不表示全部验收通过。")
+            try:
+                _output(api, args, report)
+            except (OSError, api.PSAPIError) as output_error:
+                _error(api, f"{exc}; recovery report could not be written: {output_error}")
+            if args.cmd in ("ci", "menu", "html", "stylesheet", "service", "service-op", "message-catalog", "portal") and getattr(exc, "code", None) == 409:
+                raise api.PSAPIError(f"{exc}; workflow incomplete; inspect completedWrites and lastRequest before continuing.",
+                                     code=409, hint=getattr(exc, "hint", None)) from exc
+            _error(api, f"{exc}; workflow incomplete; inspect completedWrites and lastRequest before continuing.")
+        raise
+
+
+def _execute(api, args):
+    if args.op == "list":
+        if args.cmd == "service-op" and args.kind != "operation":
+            _error(api, "service-op list 只列出操作；版本、Handler 和 Routing 请读取所属操作的 struct。")
+        if not 1 <= args.limit <= 200 or len(args.name) > 30 or len(args.after) > 30:
+            _error(api, "list 的 limit 须为 1..200；前缀和 after 最多 30 字符。")
+        payload = dict(kind=KINDS[args.cmd], prefix=args.name, limit=args.limit, after=args.after)
         if args.cmd == "portal":
-            result = call("validate")
-            _output(api, args, result)
-            if not result.get("valid"):
-                _error(api, "Portal runtime validation failed; see the returned object errors.")
-            return result
-        return _validate_rest(api, args, keys, call)
-    if args.op == "tree":
-        if args.type != "folder":
-            _error(api, "tree requires --type folder.")
-        visited = set()
-        def walk(name):
-            if name in visited or len(visited) >= 1000:
-                _error(api, "Portal tree contains a cycle or exceeds 1000 folders.")
-            visited.add(name)
-            view = api._api_call(endpoint, dict(keys, name=name, operationType="view"))
-            return dict(name=name, label=view["LabelName"], sequence=view["SeqNum"],
-                folders=[walk(r["ObjName"]) for r in sorted(view["ChildFldr"], key=lambda r: (r["SeqNum"], r["ObjName"]))],
-                content=sorted(view["ChildCref"], key=lambda r: (r["SeqNum"], r["ObjName"])))
-        return _output(api, args, dict(portal=args.portal, tree=walk(args.name)))
-    if args.op == "plan-delete" or (args.cmd == "service-op" and args.op == "delete" and args.kind == "operation"):
-        return _delete_operation(api, args, keys, call)
-    code = args.op in ("view-code", "modify-code", "delete-code")
-    if code:
-        if not args.bar or not args.item:
-            _error(api, "Menu PeopleCode requires exact --bar and --item; event is ItemSelected.")
-        keys.update(BarName=args.bar, ItemName=args.item)
-    if args.op in READS:
-        result = call("viewCode" if code else "exists" if args.op == "exists" else "view")
-        if args.cmd == "message-catalog" and args.number is not None and args.op != "exists":
-            result["messages"] = [r for r in result["messages"] if r["messageNumber"] == args.number]
-            if not result["messages"]:
-                _error(api, "The requested message number does not exist.")
-        if code:
-            path = api._cache_artifact(f"{args.name}_{args.bar}_{args.item}_ItemSelected", ".pcode", result["peoplecode"])
-            result["cachePath"] = str(path)
-        return _output(api, args, result)
-    project, _ = _project(api, args)
-    creating = args.op == "create-set" or (args.op == "create" and keys["kind"] != "catalog")
-    before = call("exists") if creating else call("viewCode" if code else "view")
-    if creating and before["exists"]:
-        _error(api, "Definition already exists; use modify.")
-    snapshot = _document(api, args.snapshot) if args.snapshot else before
-    if args.snapshot and snapshot.get("environment") not in (None, api.ENVIRONMENT):
-        _error(api, "The snapshot belongs to another environment.")
-    action = {"create-set": "createSet", "delete-item": "deleteChild", "delete-child": "deleteChild",
-        "set-attribute": "modify", "delete-attribute": "deleteChild",
-        "set-permission": "modify", "delete-permission": "deleteChild", "move": "modify",
-        "modify-code": "modifyCode", "delete-code": "deleteCode"}.get(args.op, args.op)
-    patch = _patch(api, args)
-    if keys["kind"] == "catalog" and args.op == "modify" and args.number is None and set(patch.get("properties", {})) & {"text", "explanation", "severity"}:
-        _error(api, "Message text/explanation/severity modification requires --number.")
-    if keys["kind"] == "portal" and not creating and args.type != "folder" and before.get("IsLink") != (args.type == "link"):
-        _error(api, "--type does not match the saved CREF/Link definition.")
-    payload = dict(patch, dryRun=args.dry_run)
-    item_code = None
-    if args.cmd == "menu" and args.op == "delete-item" and before.get("Menutype") == 1:
-        item_code = call("viewCode", BarName=args.bar, ItemName=args.item)
-    if not creating:
-        if code:
-            payload["expectedCode"] = snapshot["peoplecode"]
-        else:
-            if not snapshot.get("stateToken"):
-                _error(api, "Snapshot lacks stateToken; read it with the 2.4 endpoint first.")
-            payload["expectedState"] = snapshot["stateToken"]
-    if args.cmd == "message-catalog" and args.number is not None:
-        payload["messageNumber"] = args.number
-    if args.cmd == "service-op" and args.op == "set-permission":
-        if not args.access:
-            _error(api, "set-permission requires --access full|none.")
-        payload["access"] = 4 if args.access == "full" else 0
-    if code and args.op == "modify-code":
-        if not args.file:
-            _error(api, "modify-code requires --file.")
-        payload["peoplecode"] = _read_file(api, args.file)
-    if not patch and action in ("modify", "deleteChild") and keys["kind"] != "permission":
-        _error(api, "No changes supplied; use --file or the named property options.")
-    result = call(action, **payload)
-    if not args.dry_run:
-        if code:
-            actual = call("viewCode")
-            if args.op == "delete-code":
-                if actual["exists"]:
-                    _error(api, "Deleted Menu PeopleCode still exists.")
-            elif api._peoplecode_signature(actual["peoplecode"]) != api._peoplecode_signature(payload["peoplecode"]):
-                _error(api, "Menu PeopleCode readback differs.")
-        elif action == "delete" and keys["kind"] != "catalog":
-            if call("exists")["exists"]:
-                _error(api, "Deleted definition still exists.")
-        else:
-            actual = call("view")
-            if keys["kind"] == "catalog":
-                _catalog_verify(api, args, result, patch, actual)
-            elif keys["kind"] == "permission":
-                if actual["access"] != payload["access"]:
-                    _error(api, "Operation permission readback differs.")
-            else:
-                _verify(api, actual, patch, action == "deleteChild")
-        if keys["kind"] == "catalog" and result["messageNumber"] == 0:
-            for row in result["after"]["messages"]:
-                _register(api, project, 25, [args.name, str(row["messageNumber"])])
-        else:
-            typ, values = _project_values(keys, result, code)
-            _register(api, project, typ, values, action in ("delete", "deleteCode"))
-        if keys["kind"] == "operation":
-            _verify_service_membership(api, args.name, actual["Servicename"])
-            for service in {before.get("Servicename"), actual["Servicename"]} - {None, ""}:
-                if service != actual["Servicename"]:
-                    _verify_service_membership(api, args.name, service, present=False)
-                _register(api, project, TYPES["service"], [service])
-        result.update(verified=True, project=project)
-        if item_code and item_code["exists"]:
-            _register(api, project, 9, [args.name, args.bar, args.item, "ItemSelected"], True)
-    result["environment"] = api.ENVIRONMENT
-    return _output(api, args, result)
+            payload.update(PortalName=args.portal, RefType="F" if args.type=="folder" else "C")
+            if args.type != "folder":
+                payload["IsLink"] = args.type == "link"
+        return _output(api, args, api._api_call("AI_LIST_DEFN.v1/", payload))
+    if not args.name:
+        _error(api, "此操作需要明确的定义名称。")
+    if args.cmd in ("service", "service-op", "message-catalog", "portal"):
+        from managed_operations import handle
+        return handle(api, args)
+    if args.cmd == "ci":
+        from ci_operations import handle
+        return handle(api, args)
+    if args.cmd == "menu":
+        from menu_operations import handle
+        return handle(api, args)
+    if args.cmd in ("html", "stylesheet"):
+        from content_operations import handle
+        return handle(api, args)
+    raise api.PSAPIError('Unsupported definition command; a versioned handler is required.')
 
 
 def _query_rows(api, data):
@@ -447,16 +490,21 @@ def _validate_rest(api, args, keys, call):
     operation = call("view")
     issues = []
     endpoint = ENDPOINTS["service-op"]
-    if operation["RestService"] != 2 or operation["Rtngtype"] != "S":
-        issues.append("Operation must be synchronous REST Provider.")
-    if not operation["Operationuritemplate"]:
+    protocol = operation["RestService"]
+    if protocol not in (0, 2) or operation["Rtngtype"] != "S":
+        issues.append("Operation must be synchronous SOAP or REST Provider.")
+    if protocol == 2 and not operation["Operationuritemplate"]:
         issues.append("No URI templates.")
+    if protocol == 0 and (operation["Operationuritemplate"] or operation["Restmethod"]):
+        issues.append("SOAP operation contains REST method/URI settings.")
     service = None
     service_keys = dict(kind="service", name=operation["Servicename"])
     if not service_keys["name"] or not api._api_call(ENDPOINTS["service"], dict(service_keys, operationType="exists"))["exists"]:
         issues.append("Parent service is missing.")
     else:
         service = api._api_call(ENDPOINTS["service"], dict(service_keys, operationType="view"))
+        if service["RestService"] != protocol:
+            issues.append("Parent service protocol differs.")
         if not any(row["Operationname"] == args.name for row in service["Serviceopr"]):
             issues.append("Operation is absent from its parent service; PIA search and permission grouping cannot find it.")
     version_name = args.version or operation["Defaultversion"]
@@ -470,6 +518,8 @@ def _validate_rest(api, args, keys, call):
             issues.append("Version is inactive.")
         if not version["Oprverdfnparm"]:
             issues.append("No version message bindings.")
+        if protocol == 0 and not {"REQUEST", "RESPONSE"} <= {r["Parametername"] for r in version["Oprverdfnparm"]}:
+            issues.append("Synchronous SOAP requires REQUEST and RESPONSE messages.")
         if not version["Oprvgenrtgparm"]:
             issues.append("No version routing bindings.")
     handlers = []
@@ -498,7 +548,7 @@ def _validate_rest(api, args, keys, call):
                   validation="Definition checks only; this command does not invoke the business endpoint.")
     _output(api, args, result)
     if issues:
-        _error(api, "REST definition validation failed; inspect issues in the JSON result.")
+        _error(api, "Service operation validation failed; inspect issues in the JSON result.")
 
 
 def _delete_operation(api, args, keys, call):
@@ -546,129 +596,10 @@ def _delete_operation(api, args, keys, call):
                   preserved="Shared Message definitions and Application Classes are preserved.")
     if args.op == "plan-delete":
         return _output(api, args, result)
-    project, _ = _project(api, args)
-    if args.dry_run:
-        return _output(api, args, result)
-    completed = []
-    for target in plan:
-        k = target["keys"]
-        # Previous child deletion can update derived parent references. All other
-        # properties must still match the reviewed plan before proceeding.
-        current = api._api_call(endpoint, dict(k, operationType="view"))
-        derived = {"stateToken", "Operationhandler", "Operationversion", "Oprvgenrtgparm"}
-        old = {n: v for n, v in target["before"].items() if n not in derived}
-        now = {n: v for n, v in current.items() if n not in derived}
-        if old != now:
-            _error(api, f"Definition changed during deletion: {k}; completed={completed}.")
-        api._api_call(endpoint, dict(k, operationType="delete", expectedState=current["stateToken"]))
-        if api._api_call(endpoint, dict(k, operationType="exists"))["exists"]:
-            _error(api, f"Deletion readback failed: {k}; completed={completed}.")
-        typ, values = _project_values(k, {})
-        _register(api, project, typ, values, True)
-        if k["kind"] == "operation":
-            service = current["Servicename"]
-            _verify_service_membership(api, args.name, service, present=False)
-            _register(api, project, TYPES["service"], [service])
-        completed.append(k)
-    result.update(dryRun=False, verified=True, project=project, deleted=completed)
-    return _output(api, args, result)
+    from managed_operations import workflow
+    return workflow(api, args, endpoint, keys)
 
 
 def _configure_rest(api, args):
-    """Create/update a complete REST chain from an explicit, reviewable recipe."""
-    recipe = _document(api, args.file)
-    if set(recipe) - {"operation", "version", "handler", "routing", "permissionList"}:
-        _error(api, "Unknown REST recipe sections.")
-    if not all(isinstance(recipe.get(k), dict) for k in ("operation", "version", "handler", "routing")):
-        _error(api, "REST recipe requires operation, version, handler and routing objects.")
-    project, _ = _project(api, args)
-    endpoint = ENDPOINTS["service-op"]
-    if recipe.get("permissionList"):
-        data = api._api_call("AI_QUERY_RECORD.v1/", dict(record="PSCLASSDEFN", fields=["CLASSID"],
-            filter=[dict(field="CLASSID", op="=", value=recipe["permissionList"])], maxRows=2))
-        if len(list(_query_rows(api, data))) != 1:
-            _error(api, "REST recipe permissionList does not exist; no definitions were saved.")
-    definitions = []
-    for kind in ("operation", "version", "handler", "routing"):
-        entry = dict(recipe[kind])
-        if kind != "operation" and not entry.get("name"):
-            _error(api, f"REST recipe {kind}.name is required.")
-        name = entry.pop("name", args.name)
-        if kind == "operation" and name != args.name:
-            _error(api, "REST recipe operation.name must match the command's operation name.")
-        keys = dict(kind=kind, name=name)
-        if kind == "version":
-            keys.update(name=args.name, Versionname=name)
-        elif kind == "handler":
-            keys.update(name=args.name, Handlername=name)
-        elif kind == "routing":
-            keys["Effdt"] = entry.pop("effdt", "1900-01-01")
-        if set(entry) - {"properties", "collections"}:
-            _error(api, f"Unknown {kind} recipe fields.")
-        definitions.append((keys, entry))
-    op_props = definitions[0][1].get("properties", {})
-    route_props = definitions[3][1].get("properties", {})
-    if op_props.get("Defaultversion") != definitions[1][0]["Versionname"]:
-        _error(api, "REST recipe operation.Defaultversion must match version.name.")
-    if route_props.get("Operationname") != args.name or route_props.get("Operationversion") != definitions[1][0]["Versionname"]:
-        _error(api, "REST recipe routing must reference this operation and version.")
-    snapshots = []
-    for keys, entry in definitions:
-        exists = api._api_call(endpoint, dict(keys, operationType="exists"))["exists"]
-        before = api._api_call(endpoint, dict(keys, operationType="view")) if exists else None
-        snapshots.append((keys, entry, before))
-    if args.snapshot:
-        snapshot = _document(api, args.snapshot)
-        if not snapshots[0][2] or snapshot.get("stateToken") != snapshots[0][2]["stateToken"] or snapshot.get("environment") not in (None, api.ENVIRONMENT):
-            _error(api, "REST operation differs from --snapshot; no definitions were saved.")
-    # Validate every definition before saving the first one. Creation can refer to a
-    # draft operation; the completed chain is re-read after all saves.
-    results = []
-    for keys, entry, before in snapshots:
-        payload = dict(keys, operationType="modify" if before else "create", dryRun=True, **entry)
-        if before:
-            payload["expectedState"] = before["stateToken"]
-        results.append(api._api_call(endpoint, payload))
-    if args.dry_run:
-        return _output(api, args, dict(environment=api.ENVIRONMENT, dryRun=True, plan=results))
-    saved = []
-    for keys, entry, before in snapshots:
-        payload = dict(keys, operationType="modify" if before else "create", **entry)
-        if before:
-            # Native saves can update related definitions' reference collections.
-            fresh = api._api_call(endpoint, dict(keys, operationType="view"))
-            payload["expectedState"] = fresh["stateToken"]
-        result = api._api_call(endpoint, payload)
-        actual = api._api_call(endpoint, dict(keys, operationType="view"))
-        _verify(api, actual, entry)
-        typ, values = _project_values(keys, result)
-        _register(api, project, typ, values)
-        if keys["kind"] == "operation":
-            _verify_service_membership(api, args.name, actual["Servicename"])
-            for service in {(before or {}).get("Servicename"), actual["Servicename"]} - {None, ""}:
-                if service != actual["Servicename"]:
-                    _verify_service_membership(api, args.name, service, present=False)
-                _register(api, project, TYPES["service"], [service])
-        saved.append(dict(keys=keys, after=actual))
-    # Native child saves populate the parent's derived version/handler/routing lists.
-    for row in saved:
-        row["after"] = api._api_call(endpoint, dict(row["keys"], operationType="view"))
-    operation = saved[0]["after"]
-    version_name = definitions[1][0]["Versionname"]
-    handler_name = definitions[2][0]["Handlername"]
-    route_name = definitions[3][0]["name"]
-    if operation["Defaultversion"] != version_name or not any(v["Versionname"] == version_name for v in operation["Operationversion"]):
-        _error(api, "REST default version is not linked to the saved operation.")
-    if not any(h["Handlername"] == handler_name for h in operation["Operationhandler"]):
-        _error(api, "REST handler is not linked to the saved operation.")
-    if not any(r["Routingdefnname"] == route_name for r in saved[1]["after"]["Oprvgenrtgparm"]):
-        _error(api, "REST routing is not linked to the saved version.")
-    if recipe.get("permissionList"):
-        keys = dict(kind="permission", name=args.name, permissionList=recipe["permissionList"])
-        before = api._api_call(endpoint, dict(keys, operationType="view"))
-        api._api_call(endpoint, dict(keys, operationType="modify", access=4, expectedState=before["stateToken"]))
-        actual = api._api_call(endpoint, dict(keys, operationType="view"))
-        if actual["access"] != 4:
-            _error(api, "REST chain saved, but Permission List readback failed.")
-        saved.append(dict(keys=keys, after=actual))
-    return _output(api, args, dict(environment=api.ENVIRONMENT, verified=True, project=project, definitions=saved))
+    from managed_operations import workflow
+    return workflow(api, args, ENDPOINTS['service-op'], dict(kind='operation', name=args.name))

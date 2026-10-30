@@ -1,5 +1,23 @@
 # 门户注册表
 
+读写分离部署：查询使用 `C_META_DATA_READ` 的对应 `AI_READ_*` URI，写入使用 `C_META_DATA_WRITE` 的原 `AI_OPER_*` URI；处理类分别位于 `C_META_DATA_PKG:MetaData:Read`、`:Write`。CLI 在 split 环境自动选择，完整映射及许可权配置见 [安装与读写分离](01-auth-api.md#读写分离2026-10-30)。下文参数/版本契约继续适用；旧混合 URI 的读取示例须改用对应 Read URI。
+
+## 原始版本保护（2026-10-29）
+
+Folder/CREF/Link 的全部已开放写入，包括创建、属性修改、移动、属性/权限增删和已有精确删除，都强制原始 expectedVersion。view/struct/exists 返回 version（por1:）、managedVersionControl=1 及完整 PortalName/RefType/name 的 versionKeys；不存在名称也返回原始版本。缺少/空版本428，过期409。PRSM 锁内比较保存，失败回滚。
+
+令牌覆盖对象、翻译、属性/值、权限、隐藏/系统属性及删除等原生行，并包含祖先与继承权限、直接子项、CREF引用链接和Link目标状态。因此子项、继承权限或链接目标变化也可能使旧快照失效。创建和移动仍校验目标父目录、访问权限和循环；不因此开放文件夹删除。
+
+CLI 先 struct/view，创建也先读取不存在名称；原始快照绑定环境、服务器、节点、账号和完整门户键。写入仅使用此前缓存或 --snapshot，exists 不刷新编辑缓存。409 保留原稿与快照、另存最新结构，不自动换基线重试；保存后独立回读，再登记完整55类型工程键。
+
+```powershell
+python scripts/peoplesoft_api.py portal struct C_MY_FOLDER --portal EMPLOYEE --type folder --output original.json
+python scripts/peoplesoft_api.py portal create C_MY_FOLDER --portal EMPLOYEE --parent PORTAL_ROOT_OBJECT --label '自定义目录' --snapshot original.json --project MY_PROJECT
+```
+
+须配套新版编译后的 OperPortalRegistry、Utility:ManagedVersion 和 scripts/managed_operations.py。URI和权限不变，旧客户端无版本写入会拒绝；此功能不提供历史版本库。原有属性单值规则、CREF引用保护、文件夹删除边界和运行时validate继续保留。
+
+
 REST：`AI_OPER_PORTAL_REGISTRY.v1/`；Operation：`AI_OPER_PORTAL_REGISTRY_POST`；kind=`portal`。操作已有 Portal 内的 Folder、CREF、CREF Link。Portal 实例创建、整份门户删除、文件夹删除（含空文件夹）、递归删除、专用 Fluid/主页/Pagelet 向导不开放。
 
 精确键：PortalName、RefType（F=文件夹，C=内容；Link 也用 C）、name=ObjName。`--type folder/cref/link` 必须匹配现有内容类型。标签不能作为键。写前/读取现有对象检查 Portal API 的 Authorized；创建和移动检查目标父文件夹权限及循环。
