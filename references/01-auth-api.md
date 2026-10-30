@@ -2,6 +2,8 @@
 
 当前结构和交付范围见 [架构与交付边界](architecture.md)。下文按轮次给出的工程数量属于历史验收基线；安装以随包原生 XML / INI 的实际清单为准。
 
+MetaData API 是本项目的主要交付物之一。Agent 或开发者必须先把完整工程部署到目标 PeopleSoft，配置 Integration Broker、认证及权限，再使用 Skill / CLI 或其他 API 客户端；仅安装 Skill 不会自动部署服务端。主要开发版本为 PeopleTools 8.60（Oracle / 8.60.10 验证），8.57 及更新版本大部分功能预期可用，早于 8.57 未测试。
+
 ## 读写分离（2026-10-30）
 
 panwx25 已把原 `C_META_DATA_SERVICE` 拆为两个 REST Service；原服务为空后通过原生管理器删除。工程仍为 `C_META_DATA_PKG`。
@@ -68,7 +70,7 @@ CLI 负责环境、PS_TOKEN 和文本编码。直接调用 REST 时使用 `Conte
 
 先运行 `preflight --refresh`。路由缺失时核对接口部署；180/74“找不到类”核对 Handler 与完整包，不按授权失败处理。
 
-导入使用根目录下 `C_META_DATA_PKG/` 的 XML/INI。公开候选包仅把 38 处环境专属 OPRM.RestBaseurl 主机替换为 `https://ps.example.invalid`，PeopleCode 源码及编译内容保持原生导出；目标安装必须按实际节点和主机配置 REST BaseURL，且不能照搬占位地址。核实 pside.exe 路径、数据库类型/名称、PeopleSoft 用户及 TOOLSREL；Oracle 数据库连接名可参考本机 tnsnames.ora。凭据只从配置读入内存，不写入脚本、日志或回复。
+导入使用根目录下 `C_META_DATA_PKG/` 的 XML/INI。公开发行包仅把 38 处环境专属 OPRM.RestBaseurl 主机替换为 `https://ps.example.invalid`，PeopleCode 源码及编译内容保持原生导出；目标安装必须按实际节点和主机配置 REST BaseURL，且不能照搬占位地址。核实 pside.exe 路径、数据库类型/名称、PeopleSoft 用户及 TOOLSREL；Oracle 数据库连接名可参考本机 tnsnames.ora。凭据只从配置读入内存，不写入脚本、日志或回复。
 
 下面变量使用实际配置；`$psFileRoot` 是包含项目目录的父目录，不能直接指向 XML 或 `C_META_DATA_PKG` 目录。日志目录需先创建。
 

@@ -1,6 +1,8 @@
 # 已知问题与支持边界
 
-当前候选发行版：**2.0.0-rc.1**（2026-10-30，预发布）。已知缺陷和未验收项不因候选发布而关闭。结构见 [架构说明](architecture.md)，交付条件见 [发布规划](release-roadmap.md)。
+当前正式版：**2.0.0**（2026-10-31）。剩余问题通过后续小版本修复；已知缺陷和未验收项仍保留。结构见 [架构说明](architecture.md)，后续安排见 [发布规划](release-roadmap.md)。
+
+主要开发版本为 PeopleTools 8.60，实际验证为 Oracle / 8.60.10；8.57 及更新版本大部分功能预期可用，但未逐版验证，早于 8.57 未测试。目标系统仍需自行部署 MetaData API 并验证所需功能。
 
 2026-10-30 核心范围收敛：电子表格、旧 JSON Core、演示/探针、测试迁移项和原自建翻译定义均已移出。消息翻译复用交付组件/CI，精确单语言删除保留；实现及边界见 [消息目录](15-message-catalog-api.md#独立翻译)。
 
@@ -24,7 +26,7 @@
 
 2026-10-30 Service 删除已支持空 SOAP/REST Provider 服务；原有“整份 Service 删除未开放”仅为历史边界。非空服务仍拒绝。原生删除后事务回滚会留下部分进程的删除缓存，已通过恢复行VERSION与服务/系统代数推进修复；失败后应重读快照。实现与适用版本见 [Service 删除](12-service-defn-api.md#删除空-service2026-10-30)。
 
-服务端在 PANWX25 / Oracle / PeopleTools 8.60.10 验证，当前工作区为 **2.0.0-dev.6**，未正式发行。dev.5 修复下述 Project 元数据差异；此前同步 SOAP Provider 和消息目录独立翻译的 AD/PIA、同环境原生迁移和主要流程验收沿用 dev.4 证据。SOAP 运行时 Schema 校验仍有下列未解决问题；原生 Copy 不清除缺席翻译，删除迁移须按 CLI 返回参数在目标环境重放，见 [消息目录](15-message-catalog-api.md)。CI 自定义 Methods 程序已实现；引用及 CI 多语言子结构后置。1.5.0 已正式发行，空白环境首次安装核验延期至首次真实部署。180/74“找不到类”先查 Handler 与依赖。历史见 [变更记录](../CHANGELOG.md)，发行条件见 [规划](release-roadmap.md)。
+服务端在 Oracle / PeopleTools 8.60.10 验证。以下 dev.4 / dev.5 / dev.6 记录是 2.0.0 所复用的历史证据，不表示本次重新执行全部流程。SOAP 运行时 Schema 校验仍有下列未解决问题；原生 Copy 不清除缺席翻译，删除迁移须按 CLI 返回参数在目标环境重放，见 [消息目录](15-message-catalog-api.md)。CI 自定义 Methods 程序已实现；引用及 CI 多语言子结构后置。空白环境首次安装核验延期至首次真实部署。180/74“找不到类”先查 Handler 与依赖。历史见 [变更记录](../CHANGELOG.md)，后续安排见 [规划](release-roadmap.md)。
 
 ## Menu / CI / HTML / StyleSheet 原始版本（2026-10-29）
 

@@ -1,42 +1,165 @@
-# ps-cli
+# PeopleSoft CLI & MetaData API
 
-面向 PeopleSoft 元数据开发和受控 SQL 执行的中文 skill，包含 CLI、接口参考、JSON 示例及带编译内容的 AD 原生文件工程。
+[中文](#中文) · [English](#english) · [2.0.0 Release](https://github.com/pwj-lang/peoplesoft-cli/releases/tag/v.2.0.0)
 
-当前为 **2.0.0-rc.1 候选版**，最新稳定版为 **1.5.0**。本候选版已验证 Oracle / PeopleTools 8.60.10；SOAP Validation=Y 的间歇性错误及跨环境迁移仍有未完成验证，详见 [已知问题](references/known-code-issues.md)。
+## 中文
 
-## 从哪里开始
+面向 Agent 和开发者的 PeopleSoft 元数据开发工具，通过命令行查询和维护定义、PeopleCode、工程及 Integration Broker 服务。当前正式版为 **2.0.0**，已知问题将在后续小版本中持续修复。
 
-| 目的 | 入口 |
+### 两个主要交付物
+
+- **ps-cli Skill / CLI**：Agent 开发指引、命令行工具、接口参考和请求示例，开发者也可以直接运行。
+- **MetaData API**：部署在 PeopleSoft 内的服务端 API，通过 Integration Broker 提供元数据能力。随包的 `C_META_DATA_PKG/` 是完整 Application Designer 原生 XML / INI 工程，包含 PeopleCode 源码、编译内容和运行依赖。
+
+**Agent 或开发者必须先自行将 MetaData API 部署到目标 PeopleSoft 系统，并配置 Integration Broker、认证和权限，才能使用 CLI 或直接调用 API。仅安装 Skill 不会自动部署服务端。** API 也可以独立于 Skill，由其他客户端调用。
+
+调用关系：`Agent / 开发者 → Skill / CLI 或自有客户端 → MetaData API → PeopleSoft 定义`。
+
+### PeopleTools 版本
+
+| 版本 | 说明 |
 |---|---|
-| 使用 CLI 完成开发任务 | [SKILL.md](SKILL.md) |
-| 安装、授权、迁移、健康检查 | [安装说明](references/01-auth-api.md) |
-| 理解工程、包结构及公共依赖 | [架构与交付边界](references/architecture.md) |
-| 修改或审查定义 | [开发规范](references/development-standards.md) |
-| 查支持边界和遗留问题 | [已知问题](references/known-code-issues.md) |
-| 查后续交付与版本安排 | [发布规划](references/release-roadmap.md) |
-| 查历史变更 | [CHANGELOG.md](CHANGELOG.md) |
+| **8.60** | 主要开发版本；实际开发和验证环境为 Oracle / **PeopleTools 8.60.10** |
+| **8.57 及更新版本** | 大部分功能预期可用；未逐版验证，需在目标环境编译、配置并核验所需功能 |
+| **早于 8.57** | **未测试**，不保证兼容性 |
 
-## 目录与交付
+这里的版本号指 **PeopleTools**。8.60 的验证结果不等于对所有补丁、数据库和平台组合的认证。
 
-| 目录 | 用途 |
+### 命令行可以操作哪些定义
+
+| 定义 / 命令 | 主要能力 |
 |---|---|
-| `scripts/` | CLI、环境/认证管理、对象命令及读写路由 |
-| `references/` | 对象接口、开发规范、部署、支持边界和规划 |
-| `C_META_DATA_PKG/` | AD 原生 XML / INI，包含源码及编译内容；不手改编译块 |
+| Application Package / `app-pkg` | 包、子包、类结构及类 PeopleCode 查询和维护 |
+| Field / `field` | 全局字段属性、Label 和已开放的明确删除 |
+| Record / `record` | 结构、字段/子记录、索引、事件 PeopleCode、视图 SQL 和 Build |
+| SQL / `sql` | SQL 定义、属性及正文维护 |
+| Application Engine / `ae` | Section、Step、Action、PeopleCode 和 SQL 维护 |
+| Page / `page` | 页面结构、Activate PeopleCode；已验证的 Edit / DDL 控件属性 |
+| Component / `component` | 组件、页面关联、层级 PeopleCode、Internet / Toolbar / Pagebar 属性 |
+| Menu / `menu` | 菜单栏、菜单项及 ItemSelected PeopleCode |
+| Component Interface / `ci` | CI 属性、集合、映射及自定义 Methods PeopleCode |
+| HTML / `html`；StyleSheet / `stylesheet` | HTML 和自由格式样式表的属性、正文维护 |
+| Project / `project` | 工程属性、完整成员键、Copy / Delete 与比较/迁移标记 |
+| Service / `service`；Service Operation / `service-op` | 服务、操作/版本、Handler、Routing、授权、REST / 同步 SOAP Provider、WSDL / XSD |
+| Message Catalog / `message-catalog` | 消息集、消息正文/说明及独立语言翻译；复用系统 `MESSAGE_CATALOG1` / `MESSAGE_CATALOG_CI` |
+| Portal Registry / `portal` | 门户 Folder、CREF、Link、关联及权限 |
+
+还支持 `search` 定义搜索、`query-record` 业务数据查询，以及 `sql` 查询和单独授权的 SQL DML。各定义开放的创建、修改、删除单位不同，不表示每一种定义都能整份删除；参数和限制见 [SKILL.md](SKILL.md) 及对应对象参考。
+
+### 开始使用
+
+1. 从 [Releases](https://github.com/pwj-lang/peoplesoft-cli/releases) 下载版本包，将 `ps-cli/` 安装到所用 Agent 的 skills 目录；开发者也可直接运行 CLI。
+2. 按 [安装、认证与授权](references/01-auth-api.md) 将完整 `C_META_DATA_PKG` 工程部署到 PeopleSoft，配置节点、网关、Service Operations、Handler / Routing 及账号权限。定义读写分别由 `C_META_DATA_READ` / `C_META_DATA_WRITE` 提供，SQL DML 另行授权。
+3. 配置并选中 CLI 目标环境，对本版部署选择 `split` 布局，运行预检和健康检查。CLI、文档与服务端工程使用同一版本。
+
+在 `ps-cli/` 目录中运行：
+
+```powershell
+python scripts/peoplesoft_api.py --help
+python scripts/peoplesoft_api.py env list
+# 配置并选中目标环境后：
+python scripts/peoplesoft_api.py env layout split
+python scripts/peoplesoft_api.py preflight --refresh
+python scripts/peoplesoft_api.py healthcheck --refresh
+python scripts/peoplesoft_api.py search field EMPLID
+python scripts/peoplesoft_api.py record struct JOB
+```
+
+公开工程中的环境专属 REST BaseURL 已替换为 `https://ps.example.invalid`，**部署时必须改为目标系统的实际地址**。认证及 20 项读取健康检查通过表示基本读取安装就绪；写权限和 SQL DML 需分别验证。写入使用读取时的原始 `expectedVersion`，冲突会拒绝覆盖。
+
+### 目录与文档
+
+| 位置 | 内容 |
+|---|---|
+| [SKILL.md](SKILL.md) | Agent 工作流程及对象参考入口 |
+| `scripts/` | CLI、环境/认证管理和读写路由 |
+| `C_META_DATA_PKG/` | 服务端 API 的完整 AD 原生工程及必要运行依赖 |
+| `references/` | [安装说明](references/01-auth-api.md)、[架构](references/architecture.md)、[开发规范](references/development-standards.md)和对象接口 |
 | `assets/examples/` | JSON 请求示例 |
+| [已知问题](references/known-code-issues.md) / [发布规划](references/release-roadmap.md) / [变更记录](CHANGELOG.md) | 当前边界、后续安排及历史变更 |
 
-核心 AD 工程 `C_META_DATA_PKG` 仅包含元数据接口及运行依赖：元数据处理类、所需的 `C_JSON_API` 三后端及 `C_COMMONS_PKG`。电子表格、旧 JSON Core 转发、演示/探针和测试迁移条目均不在核心工程。`C_META_DATA_PKG` 同时是元数据应用根包名，两者范围不同。门户业务包 `C_PORTAL_PKG` 已解耦。消息翻译复用系统组件 `MESSAGE_CATALOG1` 和标准 `MESSAGE_CATALOG_CI`，原自建页面/组件/CI 已移出核心工程。包职责及迁移顺序见 [架构说明](references/architecture.md)。
+核心工程仅交付 MetaData API 及实际运行依赖，不包含电子表格、演示/探针和测试定义。SOAP `Validation=Y` 的间歇性错误、跨环境及空白环境安装等未完成验证继续公开记录，后续通过小版本修复和补充验证。
 
-panwx25 使用 `C_META_DATA_READ` / `C_META_DATA_WRITE` 两个 Service；CLI 按环境选择 split / legacy，SQL DML 仍单独授权。当前验证环境为 panwx25 / Oracle / PeopleTools 8.60.10，其他版本需另行编译和验收。
+## English
 
-## 安装与维护
+A PeopleSoft metadata development toolkit for agents and developers. Use the command line to inspect and maintain definitions, PeopleCode, projects, and Integration Broker services. **2.0.0 is the current stable release**; remaining issues will be addressed in subsequent minor and patch releases.
 
-从对应的 [GitHub Release](https://github.com/pwj-lang/peoplesoft-cli/releases) 下载版本包，将 ps-cli 目录安装到所用 Agent 的 skills 目录。CLI、参考文档与服务端工程需采用同一版本，安装及旧版迁移详见安装说明。
+### Two main deliverables
 
-公开包保留原生导出的定义、全部 PeopleCode 源码和编译内容，仅将 38 个操作的环境专属 REST BaseURL 主机替换为 `https://ps.example.invalid`。导入目标后按本环境配置节点及 BaseURL，再授权并运行健康检查；不要把占位地址直接用于真实服务。原始代码和编译块未修改，公开包与服务器原始导出具有不同的完整文件哈希。
+- **ps-cli Skill / CLI**: agent instructions, command-line tools, API references, and request examples. Developers can also run the CLI directly.
+- **MetaData API**: server-side APIs running inside PeopleSoft and exposed through Integration Broker. The included `C_META_DATA_PKG/` Application Designer XML / INI project contains PeopleCode source, compiled content, and runtime dependencies.
 
-本包只保留 CLI、工程、文档和示例，配置、凭据、测试夹具及运行报告不随包分发。服务端修改后重新原生编译导出；版本安排见发布规划。
+**An agent or developer must deploy the MetaData API to the target PeopleSoft system and configure Integration Broker, authentication, and permissions before using the CLI or calling the APIs. Installing the Skill alone does not deploy the server-side APIs.** Other clients can use the APIs independently of the Skill.
 
-## 许可与安全
+Request path: `Agent / developer → Skill / CLI or custom client → MetaData API → PeopleSoft definitions`.
 
-原创内容采用 [MIT](LICENSE)；Oracle 生成内容和第三方权利范围见 [来源与许可说明](NOTICE.md)。本项目与 Oracle 无隶属、赞助或认证关系。部署及使用要求见 [安全说明](SECURITY.md)。
+### PeopleTools compatibility
+
+| Version | Status |
+|---|---|
+| **8.60** | Primary development version; developed and validated on Oracle / **PeopleTools 8.60.10** |
+| **8.57 and later** | Most features are expected to work; individual releases have not all been tested. Compile, configure, and verify the required features on your target system |
+| **Earlier than 8.57** | **Not tested**; compatibility is not guaranteed |
+
+These version numbers refer to **PeopleTools**. Validation on 8.60 does not certify every patch, database, or platform combination.
+
+### Definitions available from the command line
+
+| Definition / command | Main capabilities |
+|---|---|
+| Application Package / `app-pkg` | Packages, subpackages, classes, and class PeopleCode |
+| Field / `field` | Global field properties, labels, and supported explicit deletion |
+| Record / `record` | Structure, fields/subrecords, indexes, event PeopleCode, view SQL, and Build |
+| SQL / `sql` | SQL definitions, properties, and statement text |
+| Application Engine / `ae` | Sections, steps, actions, PeopleCode, and SQL |
+| Page / `page` | Page structure, Activate PeopleCode, and verified Edit / DDL control properties |
+| Component / `component` | Component properties, page associations, PeopleCode at supported levels, and Internet / Toolbar / Pagebar settings |
+| Menu / `menu` | Menu bars, items, and ItemSelected PeopleCode |
+| Component Interface / `ci` | CI properties, collections, mappings, and custom Methods PeopleCode |
+| HTML / `html`; StyleSheet / `stylesheet` | Properties and content of HTML definitions and free-form stylesheets |
+| Project / `project` | Properties, complete item keys, Copy / Delete, and comparison/migration flags |
+| Service / `service`; Service Operation / `service-op` | Services, operation versions, handlers, routings, permissions, REST / synchronous SOAP providers, and WSDL / XSD |
+| Message Catalog / `message-catalog` | Message sets, text/explanations, and individual translations using delivered `MESSAGE_CATALOG1` / `MESSAGE_CATALOG_CI` |
+| Portal Registry / `portal` | Folders, CREFs, links, associations, and permissions |
+
+Additional commands include definition search (`search`), business data queries (`query-record`), SQL queries, and separately authorized SQL DML (`sql`). Available create, update, and delete operations vary by definition; full-definition deletion is not available for every type. See [SKILL.md](SKILL.md) and the linked object references for parameters and limits.
+
+### Getting started
+
+1. Download a versioned package from [Releases](https://github.com/pwj-lang/peoplesoft-cli/releases). Install `ps-cli/` in your agent's skills directory, or run the CLI directly.
+2. Follow the [installation and authorization guide](references/01-auth-api.md) to deploy the complete `C_META_DATA_PKG` project. Configure the node, gateway, service operations, handlers/routings, and account permissions. Definition reads and writes use `C_META_DATA_READ` / `C_META_DATA_WRITE`; SQL DML requires separate authorization.
+3. Configure and select the CLI target environment, choose the `split` layout for this deployment, and run preflight and health checks. Keep the CLI, documentation, and server project on the same version.
+
+Run from the `ps-cli/` directory:
+
+```powershell
+python scripts/peoplesoft_api.py --help
+python scripts/peoplesoft_api.py env list
+# After configuring and selecting the target environment:
+python scripts/peoplesoft_api.py env layout split
+python scripts/peoplesoft_api.py preflight --refresh
+python scripts/peoplesoft_api.py healthcheck --refresh
+python scripts/peoplesoft_api.py search field EMPLID
+python scripts/peoplesoft_api.py record struct JOB
+```
+
+Environment-specific REST BaseURLs in the public project use `https://ps.example.invalid`; **replace them with your target system's actual addresses during deployment**. Authentication and the 20 read health checks establish basic read readiness. Verify write permissions and SQL DML separately. Definition writes use the original `expectedVersion` returned by a read and reject conflicting changes.
+
+### Files and documentation
+
+| Location | Contents |
+|---|---|
+| [SKILL.md](SKILL.md) | Agent workflow and links to object references |
+| `scripts/` | CLI, environment/authentication management, and read/write routing |
+| `C_META_DATA_PKG/` | Complete native AD project for the server APIs and required runtime dependencies |
+| `references/` | [Installation](references/01-auth-api.md), [architecture](references/architecture.md), [development rules](references/development-standards.md), and object APIs |
+| `assets/examples/` | JSON request examples |
+| [Known issues](references/known-code-issues.md) / [roadmap](references/release-roadmap.md) / [changelog](CHANGELOG.md) | Current limitations, planned work, and release history |
+
+The core project contains the MetaData APIs and their actual runtime dependencies. Spreadsheet tools, demos, probes, and test definitions are excluded. Intermittent SOAP errors with `Validation=Y`, cross-environment migration, and clean-install validation remain documented for follow-up fixes and verification.
+
+## License / 许可
+
+Original content is licensed under [MIT](LICENSE). See [NOTICE.md](NOTICE.md) for Oracle-generated content and third-party rights, and [SECURITY.md](SECURITY.md) for deployment guidance. This project is not affiliated with, sponsored by, or certified by Oracle.
+
+原创内容采用 [MIT](LICENSE)；Oracle 生成内容及第三方权利见 [NOTICE.md](NOTICE.md)，部署要求见 [SECURITY.md](SECURITY.md)。本项目与 Oracle 无隶属、赞助或认证关系。
