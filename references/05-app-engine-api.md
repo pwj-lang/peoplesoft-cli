@@ -78,12 +78,14 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_APP_ENGINE.v1/
 | deleteSection | 删除精确 Section 版本及其 Step/Action；见上方删除契约 |
 | deleteStep | 删除精确 Step 及其 Action |
 | deleteAction | 删除精确 Action 和所属程序/SQL 段/消息参数 |
-| insertStateRecord | 插入 State Record（记录名需含有 PROCESS_INSTANCE 字段且为 Key） |
+| insertStateRecord | 插入 SQL Table / Derived/Work State Record（记录需含有 PROCESS_INSTANCE Key；Derived 的跨提交保留取决于 Restart 设置） |
 | insertTempTable | 插入 Temp Table（记录名需含有 PROCESS_INSTANCE 字段且为 Key） |
 
 ---
 
 ## 各操作请求体详解
+
+CLI 的 `ae create/insert-section/insert-step/insert-action --file definition.json` 接受对应操作的业务属性对象，包括 `Sections/steps/actions` 及重启选项。文件不能覆盖 `aeId/operationType/expectedVersion/dryRun` 或命令行定位键；重复提供 `descr/comment` 会拒绝。代码/SQL 命令的 `--file` 仍读取 UTF-8 正文。创建后独立检查头属性、Section/Step/Action 结构和工程登记；Process Definition 与调度配置不在此命令范围。
 
 ### 1. struct — 查看 AE 结构
 
@@ -99,7 +101,7 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_APP_ENGINE.v1/
 | recordUse | number | 否 | 记录使用 |
 | comment | string | 否 | 注释（需 JSON 转义后传） |
 | disableRestart | string | 否 | 是否禁用重启（Y/N） |
-| AppLibrary | string | 否 | Application Library |
+| appLibrary | string | 否 | Application Library（属性区分大小写） |
 | Sections | array | 否 | Section 数组，用于批量创建 Section |
 
 ### 3. insertSection — 插入 Section

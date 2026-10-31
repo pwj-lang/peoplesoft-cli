@@ -114,14 +114,14 @@ def _check_patch(api, kind, before, after, patch):
             if len(found) != 1 or any(found[0].get(k) != v for k, v in label.items()):
                 raise api.PSAPIError("Field 标签回读不符。")
     else:
-        for key in ("descr", "comment"):
+        for key in ("descr", "comment", "optTrigFlag"):
             if key in patch and target.get(key) != patch[key]:
                 raise api.PSAPIError(f"Record 回读不符：{key}")
         for field in patch.get("fields", []):
             found = [f for f in target.get("fields", []) if f.get("fieldName") == field.get("fieldName")]
             if len(found) != 1:
                 raise api.PSAPIError("Record 字段回读缺少目标。")
-            for key in ("fieldProperty", "editTable", "labelId", "defaultRecName", "defaultFieldName"):
+            for key in ("fieldProperty", "editTable", "labelId", "defaultRecName", "defaultFieldName", "unmappedUseEdit"):
                 if key in field and (set(found[0].get(key, [])) != set(field[key]) if key == "fieldProperty" else found[0].get(key) != field[key]):
                     raise api.PSAPIError(f"Record 字段属性回读不符：{field['fieldName']}.{key}")
 
@@ -155,6 +155,11 @@ def execute(api, args):
     maximum = 18 if kind == "field" else 15
     if not re.fullmatch(r"[A-Z][A-Z0-9_]{0," + str(maximum-1) + "}", name):
         raise api.PSAPIError("无效的定义名称。")
+    if kind == 'field' and args.op.endswith('-xlat'):
+        from xlat_operations import execute as xlat_execute
+        return xlat_execute(api, args, name)
+    if kind == 'field' and any(getattr(args, a, None) is not None for a in ('value','effdt','long_name','short_name','status')):
+        raise api.PSAPIError('XLAT 参数仅用于 list/add/modify/delete-xlat。')
     endpoint = ENDPOINTS[kind]
     identity = {"fieldName" if kind == "field" else "recordName": name}
     op = args.op

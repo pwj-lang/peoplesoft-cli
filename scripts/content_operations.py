@@ -6,9 +6,9 @@ from pathlib import Path
 
 from definition_operations import _context, _path, _save
 
-ENDPOINTS = {'html': 'AI_OPER_HTML_DEFN.v1/', 'stylesheet': 'AI_OPER_STYLESHEET_DEFN.v1/'}
-FIELDS = {'html': 'ContStrData', 'stylesheet': 'ExtStyleSheetStr'}
-PREFIXES = {'html': 'html1:', 'stylesheet': 'css1:'}
+ENDPOINTS = {'html': 'AI_OPER_HTML_DEFN.v1/', 'image': 'AI_OPER_HTML_DEFN.v1/', 'stylesheet': 'AI_OPER_STYLESHEET_DEFN.v1/'}
+FIELDS = {'html': 'ContStrData', 'image': 'ContStrData', 'stylesheet': 'ExtStyleSheetStr'}
+PREFIXES = {'html': 'html1:', 'image': 'image1:', 'stylesheet': 'css1:'}
 
 
 def _read(api, kind, name, operation='struct'):
@@ -19,6 +19,8 @@ def _require_version(api, kind, data):
     if (data.get(kind + 'VersionControl') != 1 or not isinstance(data.get('version'), str)
             or not data['version'].startswith(PREFIXES[kind])):
         raise api.PSAPIError(f'服务端缺少 {kind} 版本保护；部署配套处理类并重新读取，未写入。')
+    if kind == 'image' and data.get('exists') and any(not isinstance(data.get(k), str) for k in ('blobFingerprint','translationBlobFingerprint')):
+        raise api.PSAPIError('Image 读取缺少完整 BLOB 指纹；先更新服务端并读取新的原始快照。')
 
 
 def _save_content(api, kind, name, data, prefix=''):
@@ -27,7 +29,7 @@ def _save_content(api, kind, name, data, prefix=''):
     text = data.get(FIELDS[kind])
     if not isinstance(text, str):
         raise api.PSAPIError(f'{kind} 结构缺少正文，未建立内容快照。')
-    file = api._cache_artifact(f'{prefix}{kind}_{key}_{name}', '.html' if kind == 'html' else '.css', text)
+    file = api._cache_artifact(f'{prefix}{kind}_{key}_{name}', '.svg' if kind == 'image' else '.html' if kind == 'html' else '.css', text)
     sidecar = _save(api, kind, name, data, Path(str(file) + '.snapshot.json'))
     return file, sidecar
 
@@ -74,13 +76,15 @@ def handle(api, args):
         if args.op == 'struct':
             path = _save(api, kind, name, data)
             result = dict(data, **_context(api, kind, name), artifactKind='structure', snapshotPath=str(path))
-            if data.get('exists'):
+            if data.get('exists') and kind != 'image':
                 file, sidecar = _save_content(api, kind, name, data)
                 result.update(cachePath=str(file), contentSnapshotPath=str(sidecar))
         else:
             result = data
         ops._output(api, args, result)
         return result
+    if kind == 'image' and args.op == 'clone':
+        return clone_image(api, args)
     if args.op not in ('create', 'modify'):
         raise api.PSAPIError('Unsupported HTML/StyleSheet command.')
     original = _snapshot(api, args)
@@ -109,9 +113,45 @@ def handle(api, args):
         if after['version'] != result['version']:
             _conflict(api, args, api.PSAPIError('定义在保存后再次被修改；需核实当前状态。', code=409))
         ops._verify(api, after, patch)
-        typ, values = (51, [name, '4']) if kind == 'html' else (50, [name])
+        typ, values = (49, [name, '1']) if kind == 'image' else (51, [name, '4']) if kind == 'html' else (50, [name])
         ops._register(api, project, typ, values)
         result.update(verified=True, project=project)
     result['environment'] = api.ENVIRONMENT
+    ops._output(api, args, result)
+    return result
+
+
+def clone_image(api, args):
+    import object_operations as ops
+    if not args.source or args.source == args.name or args.file or args.content_file or args.descr:
+        raise api.PSAPIError('image clone 需要不同的 --source；不接受正文或属性补丁。')
+    original = _snapshot(api, args)
+    if original.get('exists'):
+        raise api.PSAPIError('目标 Image 已存在；不覆盖。')
+    source_path = Path(args.source_snapshot).resolve() if args.source_snapshot else _path(api, 'image', args.source)
+    try: source = json.loads(source_path.read_text('utf-8-sig'))
+    except (OSError, ValueError): raise api.PSAPIError('缺少源 image struct 原始快照。') from None
+    if any(source.get(k) != v for k, v in _context(api, 'image', args.source).items()) or source.get('exists') is not True:
+        raise api.PSAPIError('源 Image 快照环境、对象或存在状态不符。')
+    _require_version(api, 'image', source)
+    project, _ = ops._project(api, args)
+    payload = dict(kind='image', name=args.name, operationType='create', sourceName=args.source,
+                   expectedSourceVersion=source['version'], expectedVersion=original['version'], dryRun=args.dry_run)
+    result = api._api_call(ENDPOINTS['image'], payload)
+    _require_version(api, 'image', result)
+    target = _read(api, 'image', args.name)
+    source_after = _read(api, 'image', args.source)
+    if source_after.get('version') != source['version']:
+        raise api.PSAPIError('源 Image 在克隆后发生变化；检查实际状态，不重试。')
+    if args.dry_run:
+        if target.get('exists') or target.get('version') != original['version']:
+            raise api.PSAPIError('Image dry-run 未保持目标缺席状态。')
+    else:
+        if (not target.get('exists') or target.get('version') != result['version'] or
+                target.get('blobFingerprint') != source.get('blobFingerprint') or
+                target.get('translationBlobFingerprint') != source.get('translationBlobFingerprint')):
+            raise api.PSAPIError('Image 已写入，但原生 BLOB 独立回读不符；检查实际状态。')
+        ops._register(api, project, 49, [args.name, '1'])
+    result.update(verified=True, project=project, dryRun=args.dry_run)
     ops._output(api, args, result)
     return result

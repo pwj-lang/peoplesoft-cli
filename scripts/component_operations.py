@@ -159,7 +159,12 @@ def handle(api,args):
     before=read(api,args)
     if before.get('componentVersionControl')!=1: raise api.PSAPIError('服务端没有版本保护；未写入。')
     if before.get('version')!=original['version']: conflict(api,args,api.PSAPIError('Component 已在快照后修改。',code=409))
-    if not before.get('exists'): raise api.PSAPIError('Component 不存在。')
+    if args.op == 'create':
+        if before.get('exists'): raise api.PSAPIError('Component 已存在；create 不会覆盖它。')
+    elif not before.get('exists'): raise api.PSAPIError('Component 不存在。')
+    if args.op in ('create','add-page','remove-page'):
+        from component_structure import write
+        return write(api,args,project,original,before)
     if args.op=='modify-props':
         payload=dict(key(args),operationType='modifyComponentProps')
         for attr,k in [('descr','descr'),('comment','comment'),('search_record','searchRecName'),('add_search_record','addSrchRecName'),('allow_add','allowAdd'),('allow_update','allowUpdateDisplay'),('allow_update_all','allowUpdateDisplayAll'),('allow_correction','allowCorrection'),('page_name','pageName'),('hidden','hidden'),('item_label','itemLabel'),('folder_tab_label','folderTabLabel')]:

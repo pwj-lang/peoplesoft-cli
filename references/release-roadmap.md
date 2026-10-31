@@ -1,6 +1,6 @@
 # 发布规划
 
-更新日期：2026-10-31。当前正式版为 **2.0.0**，承接 1.5.0 和 2.0.0-rc.1 的已交付能力。SOAP 校验等遗留问题保留在已知问题中，后续通过小版本修复和补充验证。历史发行不覆盖。实施和验收详情见 [变更记录](../CHANGELOG.md)，当前结构见 [架构与交付边界](architecture.md)。
+更新日期：2026-10-31。当前正式版为 **2.0.1**，汇总 2.0.0 后的 Page / Record 修复，以及 Component、根包、XLAT、AE JSON、SVG 能力。SOAP 校验等遗留问题保留在已知问题中，后续通过小版本修复和补充验证。历史发行不覆盖。实施和验收详情见 [变更记录](../CHANGELOG.md)，当前结构见 [架构与交付边界](architecture.md)。
 
 ## 当前交付状态
 
@@ -11,16 +11,18 @@
 | CI / HTML / StyleSheet | 定义维护、CI 自定义 Methods、明确类型限制；已有 AD/PIA 和同环境回导证据 | [三类定义](17-ci-html-stylesheet-api.md) |
 | SOAP / 消息多语言 | 同步 SOAP Provider、WSDL/XSD；消息翻译独立维护 | [服务](12-service-defn-api.md)、[消息目录](15-message-catalog-api.md) |
 | Project / Field / Record / AE | 原生键、比较/迁移标记；原始版本及已开放删除单位 | [Project](11-oper-project-defn-api.md)、[Record](06-record-defn-api.md)、[AE](05-app-engine-api.md) |
-| Page / Component | Page 原始版本及 12 项已有证据的属性；Component Internet / Toolbar / Pagebar | [Page / Component](07-page-defn-api.md) |
+| Page / Component | Page 原始版本、整页结构回放及已验属性；Component 创建/页面关联及 Internet / Toolbar / Pagebar | [Page / Component](07-page-defn-api.md) |
 | 各定义并发保护 | 已开放写入口携带原始 expectedVersion、428/409、冲突保稿 | [开发规范](development-standards.md) |
 | 读写拆分、公共依赖 | 两个 Service；JSON 三后端和必要 JavaReflect；电子表格、测试/演示和旧 Core 已移出；门户包解耦 | [架构](architecture.md) |
 | 空 Service 删除 | 只删空 SOAP/REST Provider，原始计划、dry-run、失败恢复及工程 Delete 标记 | [Service 删除](12-service-defn-api.md#删除空-service2026-10-30) |
 
 消息翻译当前复用交付 MESSAGE_CATALOG1 / MESSAGE_CATALOG_CI；原自建组件、CI、Page 及程序已移出核心工程。核心范围为接口及真实运行依赖。
 
-上表描述当前交付能力，不表示所有历史业务流程在本次发行重跑。主要开发版本为 PeopleTools 8.60，实际验证为 Oracle / 8.60.10；8.57 及更新版本大部分功能预期可用，未逐版验证，早于 8.57 未测试。正式包按 2.0.0 单独生成，保留历史候选包和 dev.6 zip。
+上表描述当前交付能力，不表示所有历史业务流程在本次发行重跑。主要开发版本为 PeopleTools 8.60，实际验证为 Oracle / 8.60.10；8.57 及更新版本大部分功能预期可用，未逐版验证，早于 8.57 未测试。正式包按 2.0.1 单独生成，保留历史候选包和 dev.6 zip。
 
 ## 后续安排与边界
+
+- **开发/管理分工**：角色、许可权、用户授权及 Process Definition/进程组/Scheduler 管理归将来的 ps-admin skill，不作为 ps-cli 社保复刻的待补开发能力；AE 程序、Field XLAT 和 AD Project 迁移仍在 ps-cli 范围。已有配置及权限是运行验收前置条件，不因边界调整而绕过校验。
 
 - **Page 小批次交付**：沿用用户 2026-10-27 确认的每批 10–20 属性安排；先收集原生/AD 证据，再实现并验收。没有依据的属性暂不支持，不自动穷举。Fluid 暂缓。
 - **SOAP 未关闭问题**：Validation=Y 间歇性 119,40 仍需定位；已通过的 SOAP 1.1/1.2 调用使用 Validation=N。该问题保留并在后续小版本跟进，不能擅自关闭现有业务接口的校验。
@@ -39,6 +41,6 @@
 
 ## 编号规则
 
-2.0.0 已作为正式基线；兼容性修复按 2.0.x 修订号发行，后续功能按范围使用 2.x 小版本。需要候选验证时使用对应的 rc 编号。接口不兼容调整须说明迁移方式；新增对象本身不必改变既有契约。
+2.0.0 为前一正式基线，2.0.1 汇总其后已验证的修复和开发工作流；后续兼容性修复按 2.0.x 修订号发行，后续功能按范围使用 2.x 小版本。需要候选验证时使用对应的 rc 编号。接口不兼容调整须说明迁移方式；新增对象本身不必改变既有契约。
 
 1.5.0 沿用已有标签 `v.1.5.0`；本地旧 `2.0.0～2.4.2` 为未公开内部实施编号，不是已发布版本。当前 GitHub 状态以实际 Release 为准，本地工作区和 zip 文件名不能替代发行记录。

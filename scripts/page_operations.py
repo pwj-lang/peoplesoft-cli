@@ -68,6 +68,55 @@ def guarded_call(api, args, payload, version):
 
 def handle_page(api, args):
     name = args.pagename
+    if args.op == 'structure':
+        from page_structure import export_structure, write_snapshot, snapshot_path_for
+        structure, snapshot = export_structure(api, name, name=getattr(args, 'name', None) or name)
+        text = json.dumps(structure, ensure_ascii=False, indent=1)
+        if args.output:
+            out = Path(args.output).resolve()
+        else:
+            base = Path(_path(api, 'page', name))
+            out = base.with_name(base.name + '.structure.json')
+        out.write_text(text, encoding='utf-8')
+        snap_path = snapshot_path_for(out)
+        write_snapshot(snap_path, snapshot)
+        print(f'Structure: {out} ({len(structure["fields"])} controls)')
+        print(f'Baseline : {snap_path} (version {snapshot["version"][:24]}...)')
+        return structure
+    if args.op == 'apply':
+        from page_structure import apply_structure, load_structure
+        if not args.file or not Path(args.file).is_file():
+            raise api.PSAPIError('apply requires --file <structure.json>')
+        data = load_structure(api, args.file)
+        project = args.project or api._active_project()
+        if not project:
+            raise api.PSAPIError('Page 写入需要 --project 或已确认的当前工程。')
+        api._require_project(project)
+        result = apply_structure(api, args, data, name)
+        if getattr(args, 'dry_run', False):
+            print(json.dumps(result, ensure_ascii=False, indent=2) if args.json
+                  else f'OK — Page apply dry run: {name} ({len(data["fields"])} controls, rolled back)')
+            return result
+        # the page is committed and apply_structure already persisted the receipt and the
+        # full-context mapping; never rewrite those files here
+        mapping_path = result.get('mappingPath')
+        result.update(pageName=name, project=project)
+        registered = True
+        try:
+            api._insert_project_item(project, 5, [name], action=0, take_action=1)
+        except api.PSAPIError as exc:
+            registered = False
+            result['registration'] = f'failed: {exc}'
+        result['registered'] = registered
+        if args.output:
+            api._write_json_atomic(Path(args.output).resolve(), result)
+        print(json.dumps(result, ensure_ascii=False, indent=2) if args.json
+              else f'OK — Page apply: {name} ({result["fieldCount"]} controls, mode {result["mode"]})')
+        if mapping_path:
+            print(f'Mapping  : {mapping_path}')
+        if not registered:
+            print(f'WARN — 页面已提交、映射已保存，但工程 {project} 登记失败：{result["registration"]}')
+        return result
     if args.op == 'struct':
         data = read(api, name)
         path = _save(api, 'page', name, data)

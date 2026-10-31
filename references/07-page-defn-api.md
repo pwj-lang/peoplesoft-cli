@@ -2,6 +2,25 @@
 
 读写分离部署：查询使用 `C_META_DATA_READ` 的对应 `AI_READ_*` URI，写入使用 `C_META_DATA_WRITE` 的原 `AI_OPER_*` URI；处理类分别位于 `C_META_DATA_PKG:MetaData:Read`、`:Write`。CLI 在 split 环境自动选择，完整映射及许可权配置见 [安装与读写分离](01-auth-api.md#读写分离2026-10-30)。下文参数/版本契约继续适用；旧混合 URI 的读取示例须改用对应 Read URI。
 
+## 2.0.1：整页结构导出与回放
+
+`page structure` 经完整原生元数据读取生成结构文件，`page apply` 通过服务端 `applyStructure` 新建或同步页面；本路径支持已验收的 Grid、Scroll Area、Button、GroupBox、Horizontal Rule 及其他回放控件。下文 dev.6 的 Edit/DDL 限制描述增量接口及当时范围，不能用于否定本路径；增量 Grid/Scroll 原型仍停用。
+
+```powershell
+python scripts/peoplesoft_api.py page structure SOURCE_PAGE --name COPY_PAGE --output ./copy-page.json
+# 编辑记录/字段等引用时，先完成这些依赖定义；保留原始快照和逻辑 id。
+python scripts/peoplesoft_api.py page apply COPY_PAGE --file ./copy-page.json --create --dry-run --project MY_PROJECT
+python scripts/peoplesoft_api.py page apply COPY_PAGE --file ./copy-page.json --create --project MY_PROJECT
+```
+
+导出同时生成绑定目标 Page、环境、服务器和账号的 `.snapshot.json`，也可显式传 `--snapshot`。保存使用原始版本，写前核对不替换基线；428/409 保留原稿。同步已有页先导出该目标页，再修改文件；仅明确的 `--delete-unlisted` 删除文件未列出的既有控件。
+
+结构保留 `page` 与 `fields[]`，控件以稳定逻辑 `id` 标识，并可含 `raw/ext/cntrldata/btndata`。省略既有子块时保留其值。保存后持久保存带完整上下文的 `.map.json` 和 `.receipt.json`，继续编辑时保留这些文件；源 PNLFLDID 与新分配原生 ID 不能混用。PARENTPNLFLDID / PAGEPNLFLDID 是目标派生引用，客户端剥离、服务端拒绝外带源值，并按目标生成。
+
+重复原生 ID、无列 Grid、空 Scroll、错误层级和不合法父容器在保存前拒绝；原生验证包含 Scroll L1→Grid L2 正例及 Grid 下嵌容器拒绝。dry-run 在服务端回滚，客户端不把预演响应当成已保存页面或写入映射；仍须独立回读证明。真实保存独立比较原生字段及引用列；工程登记与页面保存分步处理，登记失败的已提交状态需按输出继续核对。
+
+本版已在 Oracle / PeopleTools 8.60.10 对实际页面关闭重开、Validate、原生导出及 PIA 运行验证。Fluid、任意页面算法正确性和其他平台没有因此获得认证。
+
 ## 2.0.0-dev.6：Page 原始快照与第7批属性（2026-10-27）
 
 所有 Page 写入都必须使用读取时的 `expectedVersion`，包括新建、页面属性、控件新增/修改/删除及 Activate 修改/删除。`struct` 返回 `exists`、`version`、`pageVersion`；`pageVersionControl=1` 表示并发保护。不存在名称也先读结构再创建。令牌覆盖16个Page表和Activate存在性/正文；写入在PCM/PDM和已有页面行锁内比较，缺版本返回应用码428、冲突409。原生PDM缓存与Page VERSION同步维护。版本保护针对数据库已保存状态，不读取或保存AD内存草稿，也不提供历史回滚。
@@ -132,6 +151,8 @@ POST {PSFT_BASE_URL}/PSIGW/RESTListeningConnector/PSFT_HR/AI_OPER_PAGE_DEFN.v1/
 
 ### PSPNLFIELDEXT — 控件扩展 (31 字段)
 `full=1` 时按 PNLNAME/PNLFLDID 使用单个 Record 的 SelectByKey 读取扩展属性到 `fields[].ext`，不存在时为 {}。普通 struct 也读取扩展以解码属性，但不返回原始 ext；避免批量 Rowset 访问的网关错误。
+
+2026-10-31 修复完整结构读取：每个控件独立按当前 PNLFLDID 读取扩展对象，包含 Grid、Scroll Area、按钮等非 Edit/DDL 控件。旧实现可能在首个非 Edit/DDL 控件处触发 NULL/Store 错误，或复用上一个控件的扩展属性。普通模式仅为需要解码的 Edit/DDL 读取扩展，不增加其他控件的查询；本次不扩展控件写入范围。panwx25 已核对 7 张页面的 211 个控件及 6,541 个扩展属性值，完整/普通模式语义一致，页面原始版本与数据库行未改变。
 
 ### PSPNLGROUP — Component-Page 映射 (8 字段)
 PNLGRPNAME 在此表中，不在 PSPNLDEFN。
@@ -328,6 +349,29 @@ struct 的 hasPeopleCode 只描述正文是否非空，不能证明原生程序�
 page delete-code 真正删除 Activate，保留 Page/控件；删除后原生不存在，并按完整键登记 Project Delete 标记。C_AI_PF1010 关闭重开 AD 后 Activate 恢复普通字重。流程见 [真正删除](development-standards.md#peoplecode-真正删除)。
 
 ## Component 接口
+
+### 创建组件、添加和移除页面关联（2026-10-31）
+
+CLI 已封装既有 `createComponent` 与 `modifyComponent` 结构操作，沿用 Component/Market 原始版本保护：
+
+```powershell
+python scripts/peoplesoft_api.py component struct MY_COMPONENT --json
+python scripts/peoplesoft_api.py component create MY_COMPONENT --page-name MY_PAGE --search-record MY_SEARCH --descr "新组件" --project MY_PROJECT
+python scripts/peoplesoft_api.py component add-page MY_COMPONENT --page-name SECOND_PAGE --item-label "第二页" --project MY_PROJECT
+python scripts/peoplesoft_api.py component remove-page MY_COMPONENT --page-name SECOND_PAGE --project MY_PROJECT
+```
+
+创建前须先读取不存在名称；`--market` 默认 GBL。`--template-component` 选一个已有 GBL 模板（默认 DFLT_FREQUENCY），复制其组件头默认属性；不会复制模板的页面、翻译或程序。目标至少关联一张已存在的 Page。创建后用 `modify-props` 设置其他组件或页面属性，再用代码命令维护程序。上述命令未开放整份 Component 删除。
+
+多页或长说明用 `component create NAME --file create.json --project MY_PROJECT`。文件仅接受以下字段，不能携带身份、操作或版本字段；相同属性不能同时从文件和命令行提供：
+
+```json
+{"templatePnlGrp":"DFLT_FREQUENCY","descr":"新组件","descrLong":"完整说明","searchRecName":"MY_SEARCH","addSrchRecName":"","pages":[{"pnlName":"MY_PAGE","itemLabel":"首页"},{"pnlName":"SECOND_PAGE"}]}
+```
+
+页面项仅接受 `pnlName` 和可选 `itemLabel`；初始标签同时作为 Folder Tab Label，最长 18 字符，默认页面名。创建命令另支持 `--comment`、`--add-search-record`。Page、模板和非空搜索 Record 写前核对存在性，重复 Page、无效引用、无关参数和未知文件字段会被拒绝。
+
+`add-page` 追加一个已有页面；`remove-page` 只移除该 Component/Market 的关联，保留 Page 定义。命令使用原始快照提交，成功后核对页面顺序、关联属性、未修改组件属性及结果版本，重新登记类型 7/Copy；409 保留原快照、不刷新重试。这三种结构命令不支持 `--dry-run`，支持 `--json` 和 `--output`。
 
 ### Component 属性与原始快照（PANWX25 / PeopleTools 8.60.10）
 

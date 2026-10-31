@@ -10,15 +10,16 @@ ENDPOINTS = {
     "message-catalog": "AI_OPER_MESSAGE_CATALOG.v1/",
     "portal": "AI_OPER_PORTAL_REGISTRY.v1/",
     "html": "AI_OPER_HTML_DEFN.v1/",
+    "image": "AI_OPER_HTML_DEFN.v1/",
     "stylesheet": "AI_OPER_STYLESHEET_DEFN.v1/",
     "ci": "AI_OPER_CI_DEFN.v1/",
 }
 KINDS = {"service": "service", "service-op": "operation", "menu": "menu",
          "message-catalog": "catalog", "portal": "portal", "html": "html",
-         "stylesheet": "stylesheet", "ci": "ci"}
+         "stylesheet": "stylesheet", "ci": "ci", "image": "image"}
 TYPES = {"service": 79, "operation": 80, "version": 82, "handler": 81,
          "routing": 83, "menu": 6, "catalog": 25, "portal": 55,
-         "html": 51, "stylesheet": 50, "ci": 32}
+         "html": 51, "image": 49, "stylesheet": 50, "ci": 32}
 READS = {"struct", "view", "exists", "view-code", "view-permission", "plan-delete", "plan-configure", "validate", "tree", "wsdl"}
 
 
@@ -31,6 +32,7 @@ def add_parsers(sub):
         "message-catalog": ["list", "view", "struct", "exists", "create-set", "create", "modify", "delete"],
         "portal": common + ["validate", "tree", "move", "delete", "set-attribute", "delete-attribute", "set-permission", "delete-permission"],
         "html": common,
+        "image": ["struct", "exists", "clone"],
         "stylesheet": common,
         "ci": common + ["delete-item", "view-code", "modify-code", "delete-code"],
     }.items():
@@ -44,9 +46,12 @@ def add_parsers(sub):
         p.add_argument("--dry-run", action="store_true", help="验证并返回计划，不保存")
         p.add_argument("--snapshot", help="先前读取的 JSON 快照；状态变化时拒绝保存")
         p.add_argument("--output", help="将完整 JSON 结果保存到文件")
-        if command in ("html", "stylesheet"):
+        if command in ("html", "image", "stylesheet"):
             p.add_argument("--content-file", help="UTF-8 HTML/CSS 正文；允许显式空文件")
             p.add_argument("--descr", help="定义描述")
+        if command == "image":
+            p.add_argument("--source", help="clone 的已有源 SVG Image 名称")
+            p.add_argument("--source-snapshot", help="源 image struct 的原始快照")
         if command == "service":
             p.add_argument("--operation", help="生成 WSDL 的所属 SOAP Operation")
             p.add_argument("--version", help="WSDL 使用的操作版本；默认使用该操作的默认版本")
@@ -155,9 +160,9 @@ def _patch(api, args):
     for name, rows in colls.items():
         if not isinstance(rows, list) or any(not isinstance(row, dict) or any(v is None for v in row.values()) for row in rows):
             _error(api, f"Collection {name} must be an array of non-null object patches.")
-    if args.cmd in ("html", "stylesheet"):
+    if args.cmd in ("html", "image", "stylesheet"):
         if args.content_file is not None:
-            field = "ContStrData" if args.cmd == "html" else "ExtStyleSheetStr"
+            field = "ContStrData" if args.cmd in ("html", "image") else "ExtStyleSheetStr"
             if field in props:
                 _error(api, f"{field} is supplied in both --file and --content-file.")
             props[field] = _read_file(api, args.content_file)
@@ -461,7 +466,7 @@ def _execute(api, args):
     if args.cmd == "menu":
         from menu_operations import handle
         return handle(api, args)
-    if args.cmd in ("html", "stylesheet"):
+    if args.cmd in ("html", "image", "stylesheet"):
         from content_operations import handle
         return handle(api, args)
     raise api.PSAPIError('Unsupported definition command; a versioned handler is required.')

@@ -4,6 +4,7 @@ split 模式不会在权限或部署失败时回退到旧混合端点。
 """
 ROUTES = {
     "AI_OPER_APP_ENGINE.v1/": ("AI_READ_APP_ENGINE.v1/", "struct", frozenset(["struct","viewSQL","viewPeopleCode"])),
+    # createApplicationPackage and deletion operations remain on the Write endpoint.
     "AI_OPER_APP_PKG_POST.v1/": ("AI_READ_APP_PKG.v1/", "default", frozenset(["default","viewPeopleCode"])),
     "AI_OPER_COMPONENT_DEFN.v1/": ("AI_READ_COMPONENT_DEFN.v1/", "struct", frozenset(["struct","structDeep","viewPeopleCode"])),
     "AI_OPER_FIELD_DEFN.v1/": ("AI_READ_FIELD_DEFN.v1/", "query", frozenset(["query","struct"])),

@@ -2,11 +2,13 @@
 
 读写分离部署：查询使用 `C_META_DATA_READ` 的对应 `AI_READ_*` URI，写入使用 `C_META_DATA_WRITE` 的原 `AI_OPER_*` URI；处理类分别位于 `C_META_DATA_PKG:MetaData:Read`、`:Write`。CLI 在 split 环境自动选择，完整映射及许可权配置见 [安装与读写分离](01-auth-api.md#读写分离2026-10-30)。下文参数/版本契约继续适用；旧混合 URI 的读取示例须改用对应 Read URI。
 
-REST：`AI_OPER_APP_PKG_POST.v1/`。根包首次创建仍使用 AD；接口支持读取目录、维护类代码、新增类/子包，以及删除类、子包和整个应用包。认证和响应见 [安装说明](01-auth-api.md#公共调用规则)。
+REST：`AI_OPER_APP_PKG_POST.v1/`。接口支持读取目录、创建应用根包、维护类代码、新增类/子包，以及删除类、子包和整个应用包。认证和响应见 [安装说明](01-auth-api.md#公共调用规则)。
 
 ## 版本快照与写入契约
 
 `default` 和 `viewPeopleCode` 返回不透明字符串 `version`；所有写操作必须把读取时的原值放入 `expectedVersion`。不能在提交旧编辑稿前临时读取最新版本来绕过冲突检查。
+
+`default` 对不存在的根包返回 `exists=false`、空结构树和可用于创建的版本；存在时返回 `exists=true`。`rootPackageCreationVersion=1` 表示已部署根包创建协议。不存在名称的令牌还包含 APM 分配器代数：其他应用包发生结构变更也可能使其失效；创建后再删除同名根包，不能复用先前的不存在快照。已有根包的版本作用域保持为该根包。
 
 结构树每个节点有 `classPath` 和相同根包作用域的 `version`。包节点另有原生 `packageVersion`；类节点另有原生 `programVersion` 和 `programExists`，空类壳的程序版本为 0。代码读取返回 `classPath/programExists/peoplecode/programVersion/version/lastUpdate`。数值版本用于显示，提交校验使用完整 `version` 字符串。
 
@@ -19,7 +21,7 @@ REST：`AI_OPER_APP_PKG_POST.v1/`。根包首次创建仍使用 AD；接口支�
 | 428 | 缺少/空 expectedVersion，先获取快照 |
 | 409 | 版本冲突，拒绝本次写入；重新读取结构和目标代码，保留本地改稿，合并后显式提交 |
 | 403 | 正在执行的 OperAppPackage 不能通过自身接口修改、删除，包含它的祖先包也不能删除；使用 AD |
-| 404 | 根包不存在 |
+| 404 | 除结构读取/创建外，所需根包不存在 |
 | 400 | 路径、操作、编译或其他请求校验失败，检查 message |
 
 这些是响应体的 code，不保证对应 HTTP 状态。冲突不自动重试写入。元数据保存与 Project 登记分步执行，登记失败须补登记，不能重复删除。
@@ -35,10 +37,12 @@ REST：`AI_OPER_APP_PKG_POST.v1/`。根包首次创建仍使用 AD；接口支�
 | peoplecode | modifyPeopleCode 必填；insertClass 可选，完整正文按 CommonUtil EscapeJSON 编码，CLI 自动处理 |
 | expectedCode | deletePeopleCode 还须提供新鲜代码快照，编码同 peoplecode |
 | dryRun | 四种删除操作可选；只返回计划，不删除、不登记、不改变版本 |
+| descr / comment | createApplicationPackage 可选；descr 最长 30 字符，comment 按 CommonUtil EscapeJSON 编码 |
 
 | operationType | 行为 |
 |---|---|
-| default | 返回 descr/comment/lastUpdate/packageTree/version |
+| default | 返回 exists/packageTree/version；存在时另有 descr/comment/lastUpdate |
+| createApplicationPackage | 从不存在名称快照新建空根包；classPath 等于 packageRoot；拒绝覆盖已有根包和残留的包/类行 |
 | viewPeopleCode | 获取精确类程序及版本，空类壳仍可读取 |
 | modifyPeopleCode | 原生编译保存；类必须存在，允许在空类壳上创建程序；拒绝空白正文 |
 | insertClass | 新增一个类，可附代码；代码编译失败时不保留新类壳 |
@@ -62,6 +66,7 @@ REST：`AI_OPER_APP_PKG_POST.v1/`。根包首次创建仍使用 AD；接口支�
 
 ```powershell
 python scripts/peoplesoft_api.py app-pkg struct MY_ROOT --json
+python scripts/peoplesoft_api.py app-pkg create-root MY_ROOT --descr "应用根包" --project MY_PROJECT
 python scripts/peoplesoft_api.py app-pkg insert-package MY_ROOT 'MY_ROOT:App' --project MY_PROJECT
 python scripts/peoplesoft_api.py app-pkg insert-class MY_ROOT 'MY_ROOT:App:TestClass' --project MY_PROJECT
 python scripts/peoplesoft_api.py app-pkg view-code MY_ROOT 'MY_ROOT:App:TestClass'
@@ -74,6 +79,8 @@ python scripts/peoplesoft_api.py app-pkg delete-root MY_ROOT --project MY_PROJEC
 ```
 
 省略 --dry-run 才执行删除。所有写命令要求 --project 或当前工程，独立回读后按完整键登记并校验迁移标记。支持 --output 保存结果。结构写默认使用最近一次 struct 的本地结构快照，--snapshot 可显式指定；成功写入后更新结构缓存。modify-code 必须使用该类的代码快照，默认读取输入文件旁的 .snapshot.json，不能借用更新过的结构版本上传旧代码。快照绑定环境、服务器、节点、账号和包根。
+
+`create-root` 只接受新版不存在名称快照，支持 `--descr`、`--comment`，不接受代码文件或 `--dry-run`。成功后回读根包属性及版本，按服务端完整键登记 57/Copy（Package=Root、Qualify Path=`.`）。`delete-root` 会删除该根下全部类程序、子包及根包；先预演并核对范围，真正删除后回读不存在、独立搜索，并将全部返回键登记 Delete。删除前的原结构和程序备份保留，不能用作新建同名根包的快照。
 
 CLI 遇到 409 会另存 `conflict_*` 最新结构、受影响类的代码及版本快照，保留原改稿和原快照。人工合并后使用新下载文件或显式 --snapshot 再提交。目标被其他人删除时报告读取失败，不当成成功写入。若写入已确认而后续回读发生并发变化，报告已确认写入，不能误称为“写入被拒绝”。
 

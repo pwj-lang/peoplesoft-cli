@@ -1494,12 +1494,14 @@ def main():
 
     # app-pkg
     p = sub.add_parser("app-pkg", help="维护应用包")
-    p.add_argument("op", choices=["struct", "view-code", "modify-code", "delete-code", "insert-class", "insert-package", "delete-class", "delete-package", "delete-root"])
+    p.add_argument("op", choices=["struct", "view-code", "modify-code", "delete-code", "create-root", "insert-class", "insert-package", "delete-class", "delete-package", "delete-root"])
     p.add_argument("pkg")
     p.add_argument("classpath", nargs="?")
     p.add_argument("file", nargs="?")
 
-    p.add_argument("--snapshot", help="先前 struct/view-code 生成的版本快照 JSON")
+    p.add_argument("--descr", help="create-root 的根包描述，最长 30 字符")
+    p.add_argument("--comment", help="create-root 的根包说明")
+    p.add_argument("--snapshot", help="先前 struct/view-code 生成的版本快照 JSON；创建根包也需先读取不存在名称")
     p.add_argument("--json", action="store_true", help="struct 返回完整树与原生版本信息")
     p.add_argument("--project", help="写操作迁移登记工程，默认当前工程")
     p.add_argument("--dry-run", action="store_true", help="返回删除计划，不删除定义或登记工程")
@@ -1545,7 +1547,7 @@ def main():
     p.add_argument("--comment")
     p.add_argument("--recname")
     p.add_argument("file", nargs="?")
-    p.add_argument("--file", dest="input_file", help="UTF-8 正文文件；兼容原位置参数")
+    p.add_argument("--file", dest="input_file", help="UTF-8 代码/SQL正文，或 create/insert-* 的业务属性 JSON；兼容位置参数")
     p.add_argument("--snapshot", help="AE 原始结构、代码或 SQL 快照")
     p.add_argument("--json", action="store_true", help="输出完整 JSON")
     p.add_argument("--is-default", choices=["Y", "N"], default="N", help="State Record 是否默认")
@@ -1556,7 +1558,7 @@ def main():
 
     # component
     p = sub.add_parser("component", help="维护 Component 定义")
-    p.add_argument("op", choices=["struct", "structDeep", "modify-props", "view-code", "modify-code", "delete-code"])
+    p.add_argument("op", choices=["struct", "structDeep", "create", "add-page", "remove-page", "modify-props", "view-code", "modify-code", "delete-code"])
     p.add_argument("pnlgrpname")
     p.add_argument("--market", default="")
     p.add_argument("--deep", action="store_true", help="显示 Page → 层级 → Record → Field 结构")
@@ -1564,6 +1566,8 @@ def main():
     p.add_argument("--field")
     p.add_argument("--event")
     p.add_argument("--file")
+
+    p.add_argument("--template-component", help="create 的现有 GBL 模板组件，默认 DFLT_FREQUENCY")
 
     p.add_argument("--snapshot", help="原始 Component 结构或代码快照")
     p.add_argument("--json", action="store_true", help="输出完整 JSON")
@@ -1631,11 +1635,16 @@ def main():
 
     # field
     p = sub.add_parser("field", help="维护 Field 定义、版本快照及明确删除")
-    p.add_argument("op", choices=["struct", "create", "modify", "delete", "delete-label"])
+    p.add_argument("op", choices=["struct", "create", "modify", "delete", "delete-label", "list-xlat", "add-xlat", "modify-xlat", "delete-xlat"])
     p.add_argument("name")
     p.add_argument("file", nargs="?")
     p.add_argument("--label-id", help="delete-label 要删除的 Label ID")
     p.add_argument("--replacement-label-id", help="删除默认 Label 时指定已有替代标签")
+    p.add_argument("--value", help="XLAT 值，按字段长度限制为 1–4 字符")
+    p.add_argument("--effdt", help="XLAT 精确生效日期 YYYY-MM-DD；新增默认为 1900-01-01")
+    p.add_argument("--long-name", help="XLAT Long Name，最长 30 字符")
+    p.add_argument("--short-name", help="XLAT Short Name，最长 10 字符")
+    p.add_argument("--status", choices=["A", "I"], help="XLAT 状态：A=有效，I=无效")
     p.add_argument("--snapshot", help="struct 返回的版本快照")
     p.add_argument("--project", help="写后登记工程，默认当前工程")
     p.add_argument("--dry-run", action="store_true", help="只核对删除计划，不删除或登记")
@@ -1683,9 +1692,14 @@ def main():
 
     # page
     p = sub.add_parser("page", help="维护 Page 定义（AI_OPER_PAGE_DEFN_POST）")
-    p.add_argument("op", choices=["struct", "view-code", "modify-code", "delete-code", "create", "modify-props", "add-control", "del-control", "find", "mod-control"])
+    p.add_argument("op", choices=["struct", "view-code", "modify-code", "delete-code", "create", "modify-props", "add-control", "del-control", "find", "mod-control", "structure", "apply"])
     p.add_argument("pagename")
-    p.add_argument("--control-type", choices=["editBox", "dropDown"], help="本批仅支持已验证的Edit Box/Drop-Down")
+    p.add_argument("--name", help="structure/apply 的目标 Page 名（默认沿用文件内名称）")
+    p.add_argument("--create", action="store_true", help="apply 时按新建页面处理（目标名必须不存在）")
+    p.add_argument("--delete-unlisted", action="store_true", help="apply 同步时删除文件中未列出的既有控件")
+    p.add_argument("--control-type", choices=["editBox", "dropDown", "grid", "scrollArea"],
+                   help="Grid/Scroll prototype disabled; use page apply.")
+    p.add_argument("--columns", help="Disabled Grid prototype option: comma-separated field names")
     p.add_argument("--rec")
     p.add_argument("--field")
     p.add_argument("--label-text")
@@ -1792,7 +1806,7 @@ def main():
 
 
 def _dispatch(args):
-    if args.cmd in ("service", "service-op", "menu", "message-catalog", "portal", "html", "stylesheet", "ci"):
+    if args.cmd in ("service", "service-op", "menu", "message-catalog", "portal", "html", "image", "stylesheet", "ci"):
         from object_operations import execute
         return execute(sys.modules[__name__], args)
     if hasattr(args, "dbtype"):

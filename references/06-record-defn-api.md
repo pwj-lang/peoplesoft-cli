@@ -12,7 +12,7 @@ Record `struct`、`viewPeopleCode`、`viewSQL` 返回不透明 `version`（r1:�
 
 所有写操作必须携带先前读取的 `expectedVersion`，包括创建和 Build。Field create/modify 的批次在每个 fields 元素携带各自令牌；单元素也可使用根级 expectedVersion。批次先在同一锁内校验全部版本、名称及重复项，再执行写入；任一失败整体回滚。创建前先读取不存在的精确名称，缺席令牌对 RDM 变化保守失效，防止期间创建/删除后误用旧基线。
 
-Field 令牌覆盖完整定义、基准及多语言标签、定义翻译、上下文标签。Record 令牌覆盖完整结构、索引、DDL 参数、依赖字段与子记录、全部 Record 程序、视图 SQL；子记录内容/程序改变使父 Record 快照失效，影响父展开或程序的子记录删除也核对祖先版本。排序后计算 SHA-256，不使用 MAX(version) 代替完整集合。服务端获取 RDM/PCM/SRM 分配行锁后重新核对，直到保存/删除完成才提交。AD 原生保存同样使旧快照失效；一致读取前后版本不同返回冲突。
+Field 令牌覆盖完整定义、基准及多语言标签、定义翻译、上下文标签和 XLAT 定义/全部生效日期/语言行。没有 XLAT 头时还包含 XTM 分配器代数，防止新增再删除后复用旧基线；其他 XLAT 更新也可能让这种快照保守失效。Record 令牌覆盖完整结构、索引、DDL 参数、依赖字段和 XLAT 头版本、子记录、全部 Record 程序及视图 SQL；子记录内容/程序改变使父 Record 快照失效，影响父展开或程序的子记录删除也核对祖先版本。排序后计算 SHA-256，不使用 MAX(version) 代替完整集合。服务端获取 RDM/PCM/SRM 分配行锁后重新核对；XLAT 写入另锁 XTM，直到保存/删除完成才提交。AD 原生保存同样使旧快照失效；一致读取前后版本不同返回冲突。
 
 | 响应体 code | 含义 |
 |---|---|
@@ -27,7 +27,7 @@ Field 令牌覆盖完整定义、基准及多语言标签、定义翻译、上�
 
 | 接口 / operationType | 必需定位 | 语义与工程标记 |
 |---|---|---|
-| Field / deleteField | fieldName、expectedVersion | 删除全局 Field 定义及原生所属标签/语言数据；仍被 Record 使用时拒绝；类型 2 / Delete |
+| Field / deleteField | fieldName、expectedVersion | 删除全局 Field 定义及原生所属标签/语言数据；仍有 XLAT 或被 Record 使用时拒绝；类型 2 / Delete |
 | Field / deleteLabel | fieldName、labelId、expectedVersion | 删除单个基准 Label 及其翻译/上下文，保留 Field；至少留一个 Label，默认 Label 需指定 replacementLabelId，Record/Page 显式引用时拒绝；父 Field 类型 2 / Copy |
 | Record / deleteRecord | recordName、expectedVersion | 原生删除 Record、所属字段/索引等元数据、Record 程序和 type 2 视图 SQL；类型 0、8、65 / Delete |
 | Record / deleteRecordField | recordName、fieldName、expectedVersion | 移除一个直接字段或子记录引用，保留全局 Field 和子记录定义；原生重建展开字段、编号、索引及依赖父记录，清理因此消失的 Record 事件程序；保留 Record 类型 0 / Copy，程序类型 8 / Delete |
@@ -227,6 +227,8 @@ SQL 不存在时 `exists = "false"`，`statements = []`。
 
 ## createRecord 操作
 
+完整重建索引前检查 `indexes[].indexFields`：按 `keyCount` 返回有序的 `fieldName/ascDesc`，并包含 `activeFlag/custKeyOrder`。不能把非空索引的空键数组当作有效导出。创建时主索引 `_` 由 Record 的 Key 字段生成，业务补丁只另外提供自定义索引，避免重复主索引。
+
 先读取计划名称的 struct，确认 exists=false，并保留其缺席版本。创建请求中的 recordName 与 recName 必须相同，Record 名最多15字符；引用的全局 Field 必须已存在。下面以 Derived/Work（类型2）为例，不执行物理 Build：
 
 ```json
@@ -244,6 +246,8 @@ SQL 不存在时 `exists = "false"`，`statements = []`。
 CLI 文件只保留 recName、recordType、tableSpace、fields 等业务属性；不放 operationType、expectedVersion 或 dryRun。先 `record struct MY_RECORD --json`，再 `record create MY_RECORD record-create.json --project MY_PROJECT`，CLI 从原结构快照补入版本和 recordName。创建失败不会自动创建缺失的 Field。
 
 ## modifyRecord 操作
+
+整份定义重建可回读并复制 `optTrigFlag`、`tableSpace[].tempTblInstance` 和 `fields[].unmappedUseEdit`。后者仅允许未解码的 USEEDIT 位，不接受 Key 等已命名属性位；它用于原生元数据保真，不声明这些未知位的 UI 含义。修改已存在字段时未提供它则保留旧未知位。`optTrigFlag/tempTblInstance` 仅为 Y/N；tableSpace 修改须定位已有的 spaceName/dbName。`indexes` 修改目前只更新已有 indexId 的九种平台标记（0/1），不据此新增/删除索引或改变键列。
 
 修改已存在的 Record 定义。传入 fieldProperty 时，该数组是对应属性位的完整目标值，不能只传新增的一项；省略 fieldProperty 则保留原值。modifyRecord 未出现的字段保留；移除字段使用显式 deleteRecordField / record delete-field。
 
@@ -534,6 +538,38 @@ python scripts/peoplesoft_api.py field create MY_FIELD field-create.json --proje
 | version | string | f1: 不透明并发令牌，写入时原样携带 |
 | lastUpdate / comment | string | 最后更新信息和长描述 |
 | labels | array | 基准标签列表，含 labelId、longName、shortName、defaultLabel |
+
+### Field XLAT 翻译值（2026-10-31）
+
+XLAT 是 Field 的枚举翻译值，与 Label、消息目录多语言不同。本批复用 Field Read/Write 操作，需同时部署 `CoreOperFieldDefn`、`DefinitionVersion`、Field Write 白名单及新版 CLI。精确 struct 根级和 Field 项返回 `xlatMaintenanceVersion=1`；每项 `xlatValues` 返回全部历史日期，不只返回今天有效行，包含 `fieldValue/effdt/effStatus/longName/shortName/lastUpdate/translations`。translations 保留显式语言代码及长短文本。
+
+XLAT 属性的原生含义参见 [Oracle：Translate (XLAT) Table Entries](https://docs.oracle.com/en/applications/peoplesoft/peopletools/8.63/component-interfaces/understanding-translate-xlat-table-entries.html)；本实现的直接环境证据以 panwx25 / PeopleTools 8.60.10 实测为准。
+
+```powershell
+python scripts/peoplesoft_api.py field list-xlat MY_FIELD
+python scripts/peoplesoft_api.py field add-xlat MY_FIELD --value A --long-name "已批准" --project MY_PROJECT
+python scripts/peoplesoft_api.py field modify-xlat MY_FIELD --value A --effdt 1900-01-01 --short-name "批准" --status I --project MY_PROJECT
+python scripts/peoplesoft_api.py field add-xlat MY_FIELD --value A --effdt 2030-01-01 --long-name "新版本说明" --project MY_PROJECT
+python scripts/peoplesoft_api.py field delete-xlat MY_FIELD --value A --effdt 1900-01-01 --project MY_PROJECT --dry-run
+```
+
+`struct` 或 `list-xlat` 保存原始 Field 快照；写入要求该快照，可显式 `--snapshot`。成功后缓存新版本；409 保留原文件，另存最新结构，不自动重试。所有 XLAT 写入支持 `--dry-run`、`--output`；dry-run 校验后不改数据、版本或工程。`list-xlat` 只读，不登记工程。
+
+| API operationType | 行为 |
+|---|---|
+| addXlat | 新建精确 `(fieldName,fieldValue,effdt)`；不能覆盖已有行 |
+| modifyXlat | 修改精确已有行；省略文本/状态保持原值，不能借此改键 |
+| deleteXlat | 删除一个精确生效日期及其相关语言行，保留同值其他日期和相邻值 |
+
+直接 API 在根级传 `fieldName/fieldValue/effdt/expectedVersion`，add/modify 另接受 `longName/shortName/effStatus`，可选 `dryRun`；文本为普通 JSON 字符串，不套用 Field comment 的二次转义。CLI 可用位置文件替代业务属性参数，文件仅接受 `fieldValue/effdt/longName/shortName/effStatus`，相同属性不能同时由文件和参数提供。不能注入名称、操作、版本或 dryRun。
+
+限定 Character Field、定义长度 1–4；值非空且不超过字段长度，大小写保留，不能以空格结尾。longName/shortName 非空、最长 30/10 字符，不接受尾随空格；服务端在原生 Record 赋值前校验，避免字段自动截断。新增必须提供 longName，省略 shortName 时取 longName 前 10 字符；effStatus 只能为 A/I，新增默认 A。新增日期默认 1900-01-01；修改、删除必须明确指定精确日期，API 一律提供 YYYY-MM-DD。修改日期使用新增日期行并按需删除旧行，不隐式重命名。
+
+维护基准 XLAT 值；当前可读取并保留已有多语言行，不提供单语言编辑命令。修改基准文本/状态不清除语言行；删除基准行级联限定同一完整键的语言行，CLI 删除前保存完整结构备份。失效使用 `--status I`；操作不改历史业务表数据。
+
+服务端锁内校验版本及 Translate 定义访问权，复用交付 `PSXLATDEFN.FIELDNAME.FieldFormula` 的 TranslatePSLOCK/TranslateUpdateVersions 更新 XTM/SYS 和 XLAT 头版本。新增后在提交前验证实际行键；末行删除清理空头。Record 使用 TranslateTableEdit 时拒绝删除最后一个 XLAT 行；Field 类型/长度修改不能使已有值失效，删除整个 Field 前先明确删除其 XLAT。
+
+返回完整 type 4 工程键：Field(6)、Value(22)、EffDt(21)，value3 为 YYYY-MM-DD。新增/修改登记 Copy，删除该日期登记 Delete，均 Upgrade on/Done off；XLAT 操作不把父 Field 置 Delete。panwx25 已验证原生导出、Copy 及精确 Delete 同环境回放，其他目标迁移仍需验收。字段本身的创建/修改仍按 type 2 单独登记。
 
 ### Field Label 添加、修改和删除
 

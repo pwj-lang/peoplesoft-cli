@@ -1,5 +1,24 @@
 # 变更记录
 
+## 2.0.1（2026-10-31，修复版）
+
+- 补齐并修复 `page structure/apply` 整页结构回放：原始编辑基线、持久逻辑/原生 ID 映射、父/页派生引用、重复 ID 和容器层级校验、扩展子块保留、dry-run 回读及消息集编号精度。Grid/Scroll 通过整页回放验收；增量 add-control 的 Grid/Scroll 原型仍停用。
+- 修复 Page 读取扩展空对象、索引字段遗漏和 Oracle DDL 等问题，并将组件/应用根包 CLI、Field XLAT 维护纳入本次修复版本。完整 C_META_DATA_PKG 原生工程包含最新编译结果，部署须同步 CLI 与服务端。
+
+
+- 社保公积金完整隔离复刻补齐：单一 SVG Image 原生 `image struct/exists/clone`，源/目标双原始版本、BLOB 指纹、dry-run 回滚及工程登记；不扩称为任意图片格式或文件上传能力。
+- 修复 Record 索引字段返回空数组、遗漏原生存储/平台属性、修改省略 fieldProperty 时覆盖既有位的问题；保留未映射 USEEDIT 位。Oracle DDL 按原生签名长度还原数字精度，并保留必填日期 NOT NULL。
+- AE 创建/插入支持完整 JSON 属性，修复 Derived/Work 状态记录关联；维护源经服务器编译、完整原生导出后同步交付，核心仍为 301 成员 / 100 程序 / 38 操作。
+- panwx25 的 C_XI_261031 隔离工程包含开发定义、代码、自定义依赖及独立测试数据；原生校验、计算保存/重开及 AE→CI 新有效日期同步均有独立证据。原模块的三种向上取整算法原有缺陷单独记录，复刻一致不代表算法正确。
+
+- 新增 Field `list-xlat/add-xlat/modify-xlat/delete-xlat`：全部生效日期及语言行读取、基准值增改删、失效、dry-run、原始版本、XTM/SYS 缓存、完整类型 4 迁移键；Field 版本覆盖 XLAT，关联 Record 版本跟随 XLAT 头变化。
+- 明确 ps-cli 开发定义与后续 ps-admin 的运行管理边界；角色/许可权、用户授权、Process Definition、进程组和 Scheduler 日常管理不列为 ps-cli 复刻能力缺口。
+- 封装 `component create/add-page/remove-page`：原始快照、已有引用校验、多页文件创建、独立回读、保留未修改属性及完整工程登记。
+- 新增 `app-pkg create-root` 与服务端 `createApplicationPackage`；不存在名称返回版本快照，防止同名创建/删除后复用旧基线。根包新增和既有 `delete-root` 均核对完整原生工程键，整包删除独立确认不存在。
+- 修复 CoreOperPageDefn 完整结构读取中非 Edit/DDL 控件未初始化或串用扩展对象的问题。每个控件按自身 PNLFLDID 读取 PSPNLFIELDEXT，缺行返回空对象；普通模式继续仅为 Edit/DDL 解码读取扩展。
+- panwx25 的两张社保报错页面及 JOB_DATA1 恢复读取；7 张页面、211 个控件、6,541 个扩展值与数据库核对通过，页面版本、定义和普通输出均不变。
+- 更新编译后的完整原生工程及本地镜像、安装副本；未重新发行或覆盖历史 2.0.0 zip。
+
 ## 2.0.0（2026-10-31，正式发行）
 
 - 将 rc.1 的现有能力正式发行；保留已知问题和未验收项，后续通过小版本修复与补充验证，不将发行状态当作问题已关闭。

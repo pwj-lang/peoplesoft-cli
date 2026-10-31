@@ -182,7 +182,122 @@ def _verify_patch(before, after, patch):
         if (int(before['ext']['FIELDUSETEMP2']) ^ int(after['ext']['FIELDUSETEMP2'])) & ~ext_allowed:
             raise ValueError('EXT.FIELDUSETEMP2 的未指定标志位发生变化。')
 
+CONTAINER_TYPES = ('grid', 'scrollArea')
+
+
+def _strip_row(row, managed):
+    return {k: v for k, v in row.items() if k not in managed}
+
+
+def _container_controls(args, level):
+    """Build the control list for an incremental Grid / Scroll Area append."""
+    import time
+    stamp = int(time.time())
+    left = getattr(args, 'left', None)
+    top = getattr(args, 'top', None)
+    left = 68 if left is None else left
+    top = 68 if top is None else top
+    rec = getattr(args, 'rec', None)
+    if not rec:
+        raise ValueError('新增 %s 需要 --rec' % args.control_type)
+    controls = []
+    if args.control_type == 'grid':
+        columns = [c.strip() for c in (getattr(args, 'columns', None) or '').split(',') if c.strip()]
+        if not columns:
+            raise ValueError('新增 Grid 需要 --columns "FIELD1,FIELD2,..."（至少一列）')
+        width = 40 + 55 * len(columns)
+        height = 60
+        controls.append({'id': 'grid%d' % stamp, 'new': True,
+                         'raw': {'FIELDTYPE': 19, 'RECNAME': rec, 'OCCURSLEVEL': level,
+                                 'GRDCOLUMNCOUNT': len(columns),
+                                 'FIELDLEFT': left, 'FIELDTOP': top,
+                                 'FIELDRIGHT': left + width, 'FIELDBOTTOM': top + height,
+                                 'DEFERPROC': 1}})
+        for index, column in enumerate(columns):
+            controls.append({'id': 'grid%dc%d' % (stamp, index), 'new': True,
+                             'raw': {'FIELDTYPE': 4, 'RECNAME': rec, 'FIELDNAME': column,
+                                     'OCCURSLEVEL': level,
+                                     'FIELDLEFT': left + 10 + 55 * index, 'FIELDTOP': top + 20,
+                                     'LBLTYPE': 3, 'LBLLOC': 1, 'USEDEFAULTLABEL': '1',
+                                     'DEFERPROC': 1}})
+        return controls
+    field = getattr(args, 'field', None)
+    if not field:
+        raise ValueError('新增 Scroll Area 需要 --field 指定第一个子控件；空 Scroll 不是合法页面')
+    controls.append({'id': 'scroll%d' % stamp, 'new': True,
+                     'raw': {'FIELDTYPE': 27, 'RECNAME': rec, 'OCCURSLEVEL': level,
+                             'FIELDLEFT': left, 'FIELDTOP': top,
+                             'FIELDRIGHT': left + 320, 'FIELDBOTTOM': top + 180,
+                             'DEFERPROC': 1}})
+    controls.append({'id': 'scroll%dc' % stamp, 'new': True,
+                     'raw': {'FIELDTYPE': 4, 'RECNAME': rec, 'FIELDNAME': field,
+                             'OCCURSLEVEL': level,
+                             'FIELDLEFT': left + 16, 'FIELDTOP': top + 24,
+                             'LBLTYPE': 3, 'LBLLOC': 1, 'USEDEFAULTLABEL': '1',
+                             'DEFERPROC': 1}})
+    return controls
+
+
+def add_container(api, args):
+    """Append a Grid or Scroll Area through the validated structure writer."""
+    # This unpublished prototype takes a new export instead of the caller's
+    # editing baseline. Keep it unavailable until that contract is repaired and
+    # independently reviewed; the reviewed whole-page apply path remains usable.
+    raise api.PSAPIError(
+        'Grid/Scroll 增量原型尚未通过原始快照保护验收，当前未启用，未执行写入；'
+        '请使用已验收的 page apply 整页结构路径。')
+    import json
+    from pathlib import Path
+    from datetime import datetime
+    from page_structure import (export_structure, apply_structure, write_snapshot,
+                                snapshot_path_for, _context, EXT_MANAGED, DERIVED)
+    project = args.project or api._active_project()
+    if not project:
+        raise api.PSAPIError('控件写入需要 --project 或已确认的当前工程。')
+    api._require_project(project)
+    level = getattr(args, 'occurs_level', None)
+    if level is None:
+        level = 1  # real pages put grids and scroll areas at level 1+
+    if level < 0 or level > 3:
+        raise api.PSAPIError('--occurs-level 必须在 0..3')
+    try:
+        controls = _container_controls(args, level)
+    except ValueError as exc:
+        raise api.PSAPIError(str(exc)) from exc
+
+    structure, snapshot = export_structure(api, args.pagename)
+    structure['fields'].extend(controls)
+    art = api._artifact_dir()
+    art.mkdir(parents=True, exist_ok=True)
+    path = art / ('addcontrol_%s_%s.json' % (args.pagename, datetime.now().strftime('%Y%m%d%H%M%S')))
+    path.write_text(json.dumps(structure, ensure_ascii=False, indent=1), encoding='utf-8')
+    write_snapshot(snapshot_path_for(path), snapshot)
+
+    class _Args:
+        file = str(path)
+        create = False
+        dry_run = bool(getattr(args, 'dry_run', False))
+        delete_unlisted = False
+        snapshot = None
+
+    result = apply_structure(api, _Args(), structure, args.pagename)
+    if not _Args.dry_run:
+        try:
+            api._insert_project_item(project, 5, [args.pagename], action=0, take_action=1)
+        except api.PSAPIError as exc:
+            print('WARN — 页面已提交，工程 %s 登记失败：%s' % (project, exc))
+    result['controlType'] = args.control_type
+    result['controlsAdded'] = len(controls)
+    print(json.dumps(result, ensure_ascii=False, indent=2)
+          if getattr(args, 'json', False)
+          else 'OK — %s added to %s (%d controls, level %d)' % (
+              args.control_type, args.pagename, len(controls), level))
+    return result
+
+
 def write_control(api, args, adding=False):
+    if adding and getattr(args, 'control_type', None) in CONTAINER_TYPES:
+        return add_container(api, args)
     try:
         patch = build_patch(args, adding)
         if not adding and args.pnl_fld_id is None:
@@ -219,7 +334,7 @@ def write_control(api, args, adding=False):
     payload = dict(pageName=args.pagename, operationType='addControl' if adding else 'modifyControl', **patch)
     if adding:
         if args.control_type not in ('editBox', 'dropDown'):
-            raise api.PSAPIError('当前仅支持已有实验覆盖的 Edit Box/Drop-Down 新增。')
+            raise api.PSAPIError('新增仅支持 editBox/dropDown/grid/scrollArea；Grid 与 Scroll 走结构写入路径。')
         payload['controlType'] = args.control_type
         if 'htmlText' in payload:
             payload['htmlText'] = api.json_escape(payload['htmlText'])

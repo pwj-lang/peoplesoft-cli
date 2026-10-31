@@ -1,10 +1,10 @@
 # PeopleSoft CLI & MetaData API
 
-[中文](#中文) · [English](#english) · [2.0.0 Release](https://github.com/pwj-lang/peoplesoft-cli/releases/tag/v.2.0.0)
+[中文](#中文) · [English](#english) · [2.0.1 Release](https://github.com/pwj-lang/peoplesoft-cli/releases/tag/v.2.0.1)
 
 ## 中文
 
-面向 Agent 和开发者的 PeopleSoft 元数据开发工具，通过命令行查询和维护定义、PeopleCode、工程及 Integration Broker 服务。当前正式版为 **2.0.0**，已知问题将在后续小版本中持续修复。
+面向 Agent 和开发者的 PeopleSoft 元数据开发工具，通过命令行查询和维护定义、PeopleCode、工程及 Integration Broker 服务。当前正式版为 **2.0.1**，已知问题将在后续小版本中持续修复。
 
 ### 两个主要交付物
 
@@ -29,15 +29,16 @@
 
 | 定义 / 命令 | 主要能力 |
 |---|---|
-| Application Package / `app-pkg` | 包、子包、类结构及类 PeopleCode 查询和维护 |
-| Field / `field` | 全局字段属性、Label 和已开放的明确删除 |
+| Application Package / `app-pkg` | 根包增删、子包、类结构及类 PeopleCode 查询和维护 |
+| Field / `field` | 全局字段属性、Label、XLAT 全生效日期基准维护和已开放的明确删除 |
 | Record / `record` | 结构、字段/子记录、索引、事件 PeopleCode、视图 SQL 和 Build |
 | SQL / `sql` | SQL 定义、属性及正文维护 |
 | Application Engine / `ae` | Section、Step、Action、PeopleCode 和 SQL 维护 |
-| Page / `page` | 页面结构、Activate PeopleCode；已验证的 Edit / DDL 控件属性 |
-| Component / `component` | 组件、页面关联、层级 PeopleCode、Internet / Toolbar / Pagebar 属性 |
+| Page / `page` | 整页结构导出/回放（含 Grid / Scroll）、Activate PeopleCode；增量 Edit / DDL 控件属性 |
+| Component / `component` | 组件创建、页面增删/关联、层级 PeopleCode、Internet / Toolbar / Pagebar 属性 |
 | Menu / `menu` | 菜单栏、菜单项及 ItemSelected PeopleCode |
 | Component Interface / `ci` | CI 属性、集合、映射及自定义 Methods PeopleCode |
+| SVG Image / `image` | 单一 SVG 原生定义克隆、二进制指纹和双版本保护 |
 | HTML / `html`；StyleSheet / `stylesheet` | HTML 和自由格式样式表的属性、正文维护 |
 | Project / `project` | 工程属性、完整成员键、Copy / Delete 与比较/迁移标记 |
 | Service / `service`；Service Operation / `service-op` | 服务、操作/版本、Handler、Routing、授权、REST / 同步 SOAP Provider、WSDL / XSD |
@@ -45,6 +46,8 @@
 | Portal Registry / `portal` | 门户 Folder、CREF、Link、关联及权限 |
 
 还支持 `search` 定义搜索、`query-record` 业务数据查询，以及 `sql` 查询和单独授权的 SQL DML。各定义开放的创建、修改、删除单位不同，不表示每一种定义都能整份删除；参数和限制见 [SKILL.md](SKILL.md) 及对应对象参考。
+
+整页回放与增量控件维护是不同路径：Grid / Scroll 通过 `page structure/apply` 重建；`page add-control` 的 Grid / Scroll 原型仍停用。详见 [Page 工作流](references/07-page-defn-api.md#201整页结构导出与回放)。本轮隔离业务验收证明所列工作流，不等于任意模块、业务算法或空白环境均已认证。
 
 ### 开始使用
 
@@ -82,7 +85,7 @@ python scripts/peoplesoft_api.py record struct JOB
 
 ## English
 
-A PeopleSoft metadata development toolkit for agents and developers. Use the command line to inspect and maintain definitions, PeopleCode, projects, and Integration Broker services. **2.0.0 is the current stable release**; remaining issues will be addressed in subsequent minor and patch releases.
+A PeopleSoft metadata development toolkit for agents and developers. Use the command line to inspect and maintain definitions, PeopleCode, projects, and Integration Broker services. **2.0.1 is the current stable release**; remaining issues will be addressed in subsequent minor and patch releases.
 
 ### Two main deliverables
 
@@ -107,15 +110,16 @@ These version numbers refer to **PeopleTools**. Validation on 8.60 does not cert
 
 | Definition / command | Main capabilities |
 |---|---|
-| Application Package / `app-pkg` | Packages, subpackages, classes, and class PeopleCode |
-| Field / `field` | Global field properties, labels, and supported explicit deletion |
+| Application Package / `app-pkg` | Root package create/delete, subpackages, classes, and class PeopleCode |
+| Field / `field` | Global field properties, labels, effective-dated base XLAT maintenance, and supported explicit deletion |
 | Record / `record` | Structure, fields/subrecords, indexes, event PeopleCode, view SQL, and Build |
 | SQL / `sql` | SQL definitions, properties, and statement text |
 | Application Engine / `ae` | Sections, steps, actions, PeopleCode, and SQL |
-| Page / `page` | Page structure, Activate PeopleCode, and verified Edit / DDL control properties |
-| Component / `component` | Component properties, page associations, PeopleCode at supported levels, and Internet / Toolbar / Pagebar settings |
+| Page / `page` | Full-page export/replay including Grid / Scroll, Activate PeopleCode, and incremental Edit / DDL properties |
+| Component / `component` | Component creation, page add/remove/associations, PeopleCode, and Internet / Toolbar / Pagebar settings |
 | Menu / `menu` | Menu bars, items, and ItemSelected PeopleCode |
 | Component Interface / `ci` | CI properties, collections, mappings, and custom Methods PeopleCode |
+| SVG Image / `image` | Native single-SVG cloning, binary fingerprints, and source/target version guards |
 | HTML / `html`; StyleSheet / `stylesheet` | Properties and content of HTML definitions and free-form stylesheets |
 | Project / `project` | Properties, complete item keys, Copy / Delete, and comparison/migration flags |
 | Service / `service`; Service Operation / `service-op` | Services, operation versions, handlers, routings, permissions, REST / synchronous SOAP providers, and WSDL / XSD |
@@ -123,6 +127,8 @@ These version numbers refer to **PeopleTools**. Validation on 8.60 does not cert
 | Portal Registry / `portal` | Folders, CREFs, links, associations, and permissions |
 
 Additional commands include definition search (`search`), business data queries (`query-record`), SQL queries, and separately authorized SQL DML (`sql`). Available create, update, and delete operations vary by definition; full-definition deletion is not available for every type. See [SKILL.md](SKILL.md) and the linked object references for parameters and limits.
+
+Full-page replay and incremental control maintenance are separate paths. Use `page structure/apply` for Grid / Scroll; incremental Grid / Scroll prototypes remain disabled. See the [Page workflow](references/07-page-defn-api.md#201整页结构导出与回放). The isolated validation covers recorded workflows, not every module, business formula, or clean installation.
 
 ### Getting started
 

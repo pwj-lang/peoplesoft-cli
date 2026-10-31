@@ -3,15 +3,17 @@ name: ps-cli
 description: "用 CLI 查询、创建和修改 PeopleSoft 定义；用于 PeopleCode、Application Designer 开发与排障"
 license: "原创内容采用 MIT；适用范围见 LICENSE 和 NOTICE.md"
 metadata:
-  version: 2.0.0
+  version: 2.0.1
   tags: [ps, peoplesoft, peoplecode, app-designer]
 ---
 
 # PeopleSoft CLI
 
-通过 Integration Broker REST API 查询和维护 PeopleSoft 定义、PeopleCode、工程及服务配置；支持业务数据/SQL 查询，SQL DML 单独授权。当前正式版为 **2.0.0**，遗留问题后续通过小版本修复。除 Skill / CLI 外，主要交付物是 MetaData API；Agent 或开发者须先自行把完整工程部署到目标 PeopleSoft 并配置认证、路由与权限，才能使用。API 也可由其他客户端独立调用。
+通过 Integration Broker REST API 查询和维护 PeopleSoft 定义、PeopleCode、工程及服务配置；支持业务数据/SQL 查询，SQL DML 单独授权。当前正式版为 **2.0.1**，遗留问题后续通过小版本修复。除 Skill / CLI 外，主要交付物是 MetaData API；Agent 或开发者须先自行把完整工程部署到目标 PeopleSoft 并配置认证、路由与权限，才能使用。API 也可由其他客户端独立调用。
 
 实际开发或审查前读取 [开发规范](references/development-standards.md)，再按下表读取相关对象文档。部署、依赖和工具维护先读 [架构与交付边界](references/architecture.md)。
+
+ps-cli 负责以 Application Designer 为主的开发定义，包含 Field XLAT、Record、Page、Component、PeopleCode 和 AE 程序。角色/许可权、用户授权、Process Definition、进程组及 Scheduler 的日常管理留给后续独立 ps-admin skill；AD 可以迁移这些配置，不表示 ps-cli 必须承担其管理。Project 迁移能力和 API 自身的授权校验继续保留。
 
 ## 确认环境和工作工程
 
@@ -60,8 +62,8 @@ python scripts/peoplesoft_api.py project struct MY_PROJECT
 | 应用包、类与类代码 | [应用包](references/03-app-pkg-api.md) |
 | SQL 定义与正文 | [SQL](references/04-sql-defn-api.md) |
 | AE、Section、Step、Action | [AE](references/05-app-engine-api.md) |
-| Field、Label、Record、Build | [Record / Field](references/06-record-defn-api.md) |
-| Page、控件、Component 属性及代码 | [Page / Component](references/07-page-defn-api.md) |
+| Field、Label、XLAT、Record、Build | [Record / Field](references/06-record-defn-api.md) |
+| Page、控件、Component 创建/页面关联/属性及代码 | [Page / Component](references/07-page-defn-api.md) |
 | 业务数据查询 | [Query Record](references/09-query-record-api.md) |
 | SQL 查询、DML、审计和独立权限 | [SQL 执行](references/10-sql-exec-api.md) |
 | Project、完整键和迁移标记 | [Project](references/11-oper-project-defn-api.md) |
@@ -70,6 +72,7 @@ python scripts/peoplesoft_api.py project struct MY_PROJECT
 | 消息目录、独立翻译 | [消息目录](references/15-message-catalog-api.md) |
 | 门户 Folder、CREF、Link、权限 | [Portal](references/16-portal-registry-api.md) |
 | CI / Methods、HTML、自由格式 StyleSheet | [CI / HTML / StyleSheet](references/17-ci-html-stylesheet-api.md) |
+| 单一 SVG Image 定义 | [SVG Image](references/18-image-svg-api.md) |
 | 未解决问题、未验收和延期范围 | [已知问题](references/known-code-issues.md) |
 | 版本、分批交付与发行条件 | [发布规划](references/release-roadmap.md) |
 

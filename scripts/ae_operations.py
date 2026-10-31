@@ -14,6 +14,38 @@ OPERATIONS = {'create': 'createApplicationEngine', 'insert-section': 'insertSect
     'insert-state-record': 'insertStateRecord', 'insert-temp-table': 'insertTempTable'}
 DELETES = {'delete-section', 'delete-step', 'delete-action', 'delete-code'}
 
+DEFINITION_PROPERTIES = {
+    'create': {'descr', 'comment', 'programType', 'tempTblInstance', 'disableRestart', 'appLibrary',
+               'useDeleteforTruncateTable', 'shareTableinOnlineMode', 'batchOnly', 'non-sharedCannotAssigned', 'Sections'},
+    'insert-section': {'descr', 'autoCommit', 'sectionType', 'publicAccess', 'steps'},
+    'insert-step': {'descr', 'afterStepId', 'commitAfter', 'abendAction', 'actions'},
+    'insert-action': {'descr', 'reuseStatement', 'doSelectType', 'callSectionAeId', 'callSectionId',
+                      'messageSetNbr', 'messageNbr', 'messageParameter', 'peoplecodeOnReturn'},
+}
+
+
+def definition_patch(api, args, file):
+    if not file or args.op in ('modify-code', 'modify-sql'):
+        return {}
+    allowed = DEFINITION_PROPERTIES.get(args.op)
+    if allowed is None:
+        raise api.PSAPIError('该 AE 操作不接受文件。')
+    patch = api._load_json_arg(str(file), 'AE 业务属性 JSON')
+    if not isinstance(patch, dict) or not patch or set(patch) - allowed:
+        raise api.PSAPIError('AE 文件包含未知属性、定位键或操作/版本字段，或不是非空对象。')
+    for attr in ('descr', 'comment'):
+        if attr in patch and getattr(args, attr, None) is not None:
+            raise api.PSAPIError(attr + ' 不能同时从文件和命令行提供。')
+    for flag in ('disableRestart', 'appLibrary', 'useDeleteforTruncateTable', 'shareTableinOnlineMode', 'batchOnly', 'autoCommit', 'publicAccess'):
+        if flag in patch and patch[flag] not in ('Y', 'N'):
+            raise api.PSAPIError(flag + ' 必须为 Y 或 N。')
+    for collection in ('Sections', 'steps', 'actions'):
+        if collection in patch and (not isinstance(patch[collection], list) or not patch[collection] or any(not isinstance(x, dict) for x in patch[collection])):
+            raise api.PSAPIError(collection + ' 必须是非空对象数组。')
+    if 'comment' in patch:
+        patch['comment'] = api.json_escape(patch['comment'])
+    return patch
+
 
 def key(args, action=False):
     result = dict(sectionId=args.sectionid, market=args.market, dbType=args.dbtype.strip(), effdt=args.effdt)
@@ -115,6 +147,7 @@ def handle(api, args):
     file_arg = args.input_file or args.file
     if args.input_file and args.file: raise api.PSAPIError('正文文件只提供一次。')
     file = Path(file_arg).resolve() if file_arg else None
+    patch = definition_patch(api, args, file)
     if op not in ('struct', 'create', 'insert-section', 'insert-state-record', 'insert-temp-table') and not args.sectionid:
         raise api.PSAPIError('该操作需要 --sectionid。')
     if op in ('insert-action', 'view-code', 'modify-code', 'delete-code', 'view-sql', 'modify-sql', 'delete-step', 'delete-action') and not args.stepid:
@@ -160,6 +193,7 @@ def handle(api, args):
     if op == 'create' and before.get('exists'): raise api.PSAPIError('AE 已存在。')
     if op != 'create' and not before.get('exists'): raise api.PSAPIError('AE 不存在。')
     payload = dict(aeId=args.aeid, operationType=OPERATIONS[op], expectedVersion=original['version'])
+    payload.update(patch)
     if op in ('insert-section', 'insert-step', 'insert-action', 'modify-code', 'delete-code', 'modify-sql') or op in DELETES:
         payload.update(key(args, action=op in ('insert-action', 'delete-action', 'modify-sql')))
         if op == 'insert-section': payload.pop('stepId', None)

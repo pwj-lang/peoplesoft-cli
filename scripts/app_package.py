@@ -7,6 +7,7 @@ from pathlib import Path
 
 ENDPOINT = "AI_OPER_APP_PKG_POST.v1/"
 OPERATIONS = {"modify-code": "modifyPeopleCode", "insert-class": "insertClass",
+              "create-root": "createApplicationPackage",
               "insert-package": "insertPackage", "delete-class": "deleteClass",
               "delete-package": "deletePackage", "delete-root": "deleteApplicationPackage"}
 
@@ -127,7 +128,9 @@ def execute(api, args):
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,29}", args.pkg):
         raise api.PSAPIError("packageRoot 必须以字母开头，最多 30 个字母、数字或下划线。")
     path = args.classpath
-    if op == "delete-root":
+    if op == 'create-root' and args.file:
+        raise api.PSAPIError('create-root 不接受代码文件；创建后用 insert-class/modify-code。')
+    if op in ("create-root", "delete-root"):
         path = path or args.pkg
         args.classpath = path
         minimum, maximum = 1, 1
@@ -139,13 +142,18 @@ def execute(api, args):
                 not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,29}", p) for p in parts):
             raise api.PSAPIError("classPath 必须是给定根包下的完整有效路径。")
     payload = dict(packageRoot=args.pkg)
+    if op != 'create-root' and any(getattr(args, attr, None) is not None for attr in ('descr','comment')):
+        raise api.PSAPIError('--descr/--comment 仅适用于 create-root。')
     if op == "struct":
         data = api._api_call(ENDPOINT, dict(payload, operationType="default"))
         snapshot = _save_structure(api, args.pkg, data)
         if getattr(args, "json", False):
             print(json.dumps(dict(data, snapshotPath=str(snapshot)), ensure_ascii=False, indent=2))
         else:
-            api._print_pkg_tree(data.get("packageTree", {}), 0)
+            if data.get('exists') is False:
+                print(f'Application package 不存在：{args.pkg}')
+            else:
+                api._print_pkg_tree(data.get("packageTree", {}), 0)
             print(f"version: {data.get('version', '服务端未部署版本校验')}\nSnapshot: {snapshot}")
         return data
     payload["classPath"] = path
@@ -158,6 +166,15 @@ def execute(api, args):
     if getattr(args, "dry_run", False) and op not in ("delete-code", "delete-class", "delete-package", "delete-root"):
         raise api.PSAPIError("--dry-run 仅支持删除操作。")
     before = _snapshot(api, args)
+    if op == 'create-root':
+        if before.get('rootPackageCreationVersion', 0) < 1 or before.get('exists') is not False:
+            raise api.PSAPIError('create-root 需要新版接口返回的不存在名称快照；已有根包不会被覆盖。')
+        if getattr(args, 'descr', None) is not None:
+            if len(args.descr) > 30:
+                raise api.PSAPIError('根包描述最长 30 字符；尚未写入。')
+            payload['descr'] = args.descr
+        if getattr(args, 'comment', None) is not None:
+            payload['comment'] = api.json_escape(args.comment)
     payload["expectedVersion"] = before["version"]
     project = args.project or api._active_project()
     if not project:
@@ -208,6 +225,9 @@ def execute(api, args):
                 search = api._api_call("AI_SEARCH_DEFN.v1/", dict(definitionType=104, definitionName=args.pkg))
                 if any(i.get("packageId") == args.pkg for i in search.get("list", [])):
                     raise api.PSAPIError("删除根包后的独立搜索仍找到该定义。")
+                absent = api._api_call(ENDPOINT, dict(packageRoot=args.pkg, operationType="default"))
+                if absent.get('exists') is not False or absent.get('packageTree', {}).get('children'):
+                    raise api.PSAPIError('删除根包后的独立结构回读未确认完整删除。')
                 fresh = None
             else:
                 fresh = api._api_call(ENDPOINT, dict(packageRoot=args.pkg, operationType="default"))
@@ -221,7 +241,17 @@ def execute(api, args):
             fresh = api._api_call(ENDPOINT, dict(packageRoot=args.pkg, operationType="default"))
             if path not in {n.get("classPath") for n in _flatten(fresh.get("packageTree", {}))}:
                 raise api.PSAPIError("写入后的独立结构回读缺少目标。")
-            items = _copy_items(path, package=(op == "insert-package"), program=(op == "modify-code"))
+            items = _copy_items(path, package=(op in ("insert-package", "create-root")), program=(op == "modify-code"))
+            if op == 'create-root':
+                if result.get('created') is not True or fresh.get('exists') is not True or result.get('version') != fresh.get('version'):
+                    raise api.PSAPIError('根包创建后的状态或原始版本回读不符。')
+                for attr in ('descr','comment'):
+                    value = getattr(args, attr, None)
+                    if value is not None and fresh.get(attr) != value:
+                        raise api.PSAPIError('根包 '+attr+' 回读不符。')
+                items = result.get('projectItems')
+                if not isinstance(items, list) or len(items) != 1 or items[0].get('objectType') != 57:
+                    raise api.PSAPIError('根包创建响应缺少完整工程登记键。')
             if code is not None:
                 actual = api._api_call(ENDPOINT, dict(packageRoot=args.pkg, classPath=path, operationType="viewPeopleCode"))
                 if api._peoplecode_signature(actual.get("peoplecode")) != api._peoplecode_signature(code):
