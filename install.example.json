@@ -1,0 +1,25 @@
+{
+  "_help": {
+    "使用方法": "让 Agent 复制本模板为同目录的 install.local.json。只填写需要的环境，不用的环境全部留空即可自动跳过，也可以删除；更多环境可复制一块并改名。填好的副本只留在本机，不要提交或发到聊天里。",
+    "environments": "dev、uat 是示例环境名，可改成你自己的名字，使用英文字母、数字、横线或下划线。每个环境分别填写登录地址、用户名和密码。",
+    "active_environment": "可填已经填写的环境名来选择当前环境；留空则保留现有当前环境，首次安装时使用第一个填写完整的环境。",
+    "pia_base_url": "粘贴平时在浏览器打开的 PeopleSoft 登录地址，可以包含完整路径。",
+    "username": "平时登录 PeopleSoft 的用户名。",
+    "password": "这个用户名对应的密码。JSON 中反斜杠写成两个反斜杠，双引号前加反斜杠。",
+    "授权提醒": "填写本文件不会获得任何权限。导入完成后，请用户或管理员自行分配 C_PSCLI_READ（只读）或 C_PSCLI_WRITE（读写）角色，再让 Agent 验证。",
+    "安装默认": "节点固定默认使用 PSFT_HR，不用填写或确认。PeopleTools 版本和 AD 位置由 Agent 发现。"
+  },
+  "active_environment": "",
+  "environments": {
+    "dev": {
+      "pia_base_url": "",
+      "username": "",
+      "password": ""
+    },
+    "uat": {
+      "pia_base_url": "",
+      "username": "",
+      "password": ""
+    }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "read": {
+    "permissionList": "C_PSCLI_READ",
+    "role": "C_PSCLI_READ",
+    "operations": [
+      "PSTOKEN_GET",
+      "AI_READ_APP_ENGINE_POST",
+      "AI_READ_APP_PKG_POST",
+      "AI_READ_COMPONENT_DEFN_POST",
+      "AI_READ_FIELD_DEFN_POST",
+      "AI_READ_PAGE_DEFN_POST",
+      "AI_READ_PROJECT_DEFN_POST",
+      "AI_READ_RECORD_DEFN_POST",
+      "AI_READ_SQL_DEFN_POST",
+      "AI_READ_SERVICE_DEFN_POST",
+      "AI_READ_SERVICE_OP_POST",
+      "AI_READ_MENU_DEFN_POST",
+      "AI_READ_MESSAGE_CATALOG_POST",
+      "AI_READ_PORTAL_REGISTRY_POST",
+      "AI_READ_HTML_DEFN_POST",
+      "AI_READ_STYLESHEET_DEFN_POST",
+      "AI_READ_CI_DEFN_POST",
+      "AI_QUERY_RECORD_POST",
+      "AI_SEARCH_DEFN_POST",
+      "AI_EXEC_SQL_POST",
+      "AI_LIST_DEFN_POST"
+    ],
+    "messageCatalogMethods": [
+      "Get",
+      "Cancel"
+    ]
+  },
+  "write": {
+    "permissionList": "C_PSCLI_WRITE",
+    "role": "C_PSCLI_WRITE",
+    "operations": [
+      "PSTOKEN_GET",
+      "AI_READ_APP_ENGINE_POST",
+      "AI_READ_APP_PKG_POST",
+      "AI_READ_COMPONENT_DEFN_POST",
+      "AI_READ_FIELD_DEFN_POST",
+      "AI_READ_PAGE_DEFN_POST",
+      "AI_READ_PROJECT_DEFN_POST",
+      "AI_READ_RECORD_DEFN_POST",
+      "AI_READ_SQL_DEFN_POST",
+      "AI_READ_SERVICE_DEFN_POST",
+      "AI_READ_SERVICE_OP_POST",
+      "AI_READ_MENU_DEFN_POST",
+      "AI_READ_MESSAGE_CATALOG_POST",
+      "AI_READ_PORTAL_REGISTRY_POST",
+      "AI_READ_HTML_DEFN_POST",
+      "AI_READ_STYLESHEET_DEFN_POST",
+      "AI_READ_CI_DEFN_POST",
+      "AI_QUERY_RECORD_POST",
+      "AI_SEARCH_DEFN_POST",
+      "AI_EXEC_SQL_POST",
+      "AI_LIST_DEFN_POST",
+      "AI_OPER_APP_ENGINE_POST",
+      "AI_OPER_APP_PKG_POST",
+      "AI_OPER_COMPONENT_DEFN_POST",
+      "AI_OPER_FIELD_DEFN_POST",
+      "AI_OPER_PAGE_DEFN_POST",
+      "AI_OPER_PROJECT_DEFN_POST",
+      "AI_OPER_RECORD_DEFN_POST",
+      "AI_OPER_SQL_DEFN_POST",
+      "AI_OPER_SERVICE_DEFN_POST",
+      "AI_OPER_SERVICE_OP_POST",
+      "AI_OPER_MENU_DEFN_POST",
+      "AI_OPER_MESSAGE_CATALOG_POST",
+      "AI_OPER_PORTAL_REGISTRY_POST",
+      "AI_OPER_HTML_DEFN_POST",
+      "AI_OPER_STYLESHEET_DEFN_POST",
+      "AI_OPER_CI_DEFN_POST"
+    ],
+    "messageCatalogMethods": [
+      "Get",
+      "Cancel",
+      "Create",
+      "Save",
+      "AddMessage",
+      "DeleteMessage"
+    ]
+  },
+  "roleDelivery": {
+    "format": "PeopleSoft Data Mover native export",
+    "records": {
+      "PSROLEDEFN": 2,
+      "PSROLECLASS": 2
+    },
+    "sha256": "e8d5dbb979b6e49baaeecf2d78d4e4dab10ceac2cd204aed6bf7093f2ea60220",
+    "userMembersIncluded": false,
+    "sourceSha256": "d1c5bd77851fa2a7889a8bca4697c89ab287e3c20967c61ea3113d9b17ff192c",
+    "publicProjection": "Only the REM Database comment is replaced; all native record data is unchanged"
+  }
+}

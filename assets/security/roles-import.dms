@@ -1,0 +1,5 @@
+REM Agent replaces path placeholders in a private working copy before execution.
+SET INPUT <absolute-path-to-pscli-roles.dat>;
+SET LOG <private-import-log-path>;
+IMPORT PSROLEDEFN;
+IMPORT PSROLECLASS;

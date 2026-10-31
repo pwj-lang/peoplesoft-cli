@@ -1,6 +1,6 @@
 # PeopleSoft CLI & MetaData API
 
-[中文](#中文) · [English](#english) · [2.0.1 Release](https://github.com/pwj-lang/peoplesoft-cli/releases/tag/v.2.0.1)
+[中文](#中文) · [English](#english) · [2.0.2 Release](https://github.com/pwj-lang/peoplesoft-cli/releases/tag/v.2.0.2)
 
 ## 让 Agent 安装 / Install with an agent
 
@@ -8,13 +8,13 @@
 
 > 请安装并部署到我的 PeopleSoft 环境：https://github.com/pwj-lang/peoplesoft-cli
 
-Agent 从 [INSTALL.md](INSTALL.md) 读取本地 Skill 安装、原生工程导入、编译、IB 配置、授权和验收流程，先发现已有配置，只询问缺失项。若只需本地 Skill，在请求中说明“只安装本地”。首次部署仍需要可用的目标环境、AD 客户端和相应账号权限。
+项目根目录提供通用 [多环境安装填写模板](install.example.json)。Agent 复制为同目录的 `install.local.json` 并给出文件链接；在 `environments` 中填写需要的环境登录地址、用户名和密码，不用的环境全部留空即可自动跳过，更多环境可复制一块。`active_environment` 可选择当前环境，留空保留原选择，首次安装留空时用第一个填写完整的环境。Agent 校验已填写环境后批量生成正式配置，再按环境分别导入和验证；重复安装保留填写内容，逐环境检查不切换当前环境。导入后提醒用户或管理员自行分配 `C_PSCLI_READ`（只读）或 `C_PSCLI_WRITE`（读写）角色，完成后再验证权限。**节点默认固定使用 `PSFT_HR`；PeopleTools 版本和 AD 路径由 Agent 发现，用户无需运行命令。** 填写副本不提交、不打包，也不会被同步覆盖。若只需本地 Skill，在请求中说明“只安装本地”。历史发行包是否含新安装助手及预置安全定义以包内文件为准。
 
-Give your agent this repository URL and ask it to install and deploy. The agent should follow [INSTALL.md](INSTALL.md), discover existing settings, and ask only for missing information. Say “local skill only” if server deployment is not needed.
+Give your agent this repository URL and ask it to install and deploy. The agent copies [install.example.json](install.example.json) to `install.local.json`. Fill the login URL, username, and password for each environment you need; unused blocks can remain completely blank. Set `active_environment` to select one, or leave it empty to keep the current selection (the first completed entry on a fresh install). The agent validates all filled entries before merging them in one write, then verifies each environment without changing your current selection. Repeated setup preserves your input and unchanged configuration. After import, the user or administrator assigns the `C_PSCLI_READ` (read-only) or `C_PSCLI_WRITE` (read/write) role before permission verification. Nodes default to `PSFT_HR`. Local input is excluded from Git, packages, and synchronization. Say “local skill only” if server deployment is not needed.
 
 ## 中文
 
-面向 Agent 和开发者的 PeopleSoft 元数据开发工具，通过命令行查询和维护定义、PeopleCode、工程及 Integration Broker 服务。当前正式版为 **2.0.1**，已知问题将在后续小版本中持续修复。
+面向 Agent 和开发者的 PeopleSoft 元数据开发工具，通过命令行查询和维护定义、PeopleCode、工程及 Integration Broker 服务。当前正式版为 **2.0.2**，已知问题将在后续小版本中持续修复。
 
 ### 两个主要交付物
 
@@ -31,9 +31,9 @@ Give your agent this repository URL and ask it to install and deploy. The agent 
 |---|---|
 | **8.60** | 主要开发版本；实际开发和验证环境为 Oracle / **PeopleTools 8.60.10** |
 | **8.57 及更新版本** | 大部分功能预期可用；未逐版验证，需在目标环境编译、配置并核验所需功能 |
-| **早于 8.57** | **未测试**，不保证兼容性 |
+| **早于 8.57（含 8.54 / 8.55）** | 尚未实机验证；继续按目标导入、编译和功能验证，不按版本号直接拒绝 |
 
-这里的版本号指 **PeopleTools**。8.60 的验证结果不等于对所有补丁、数据库和平台组合的认证。
+这里的版本号指 **PeopleTools**。未验证不等于不支持；兼容性以目标环境的实际结果为准，不能保证任一未测版本的大部分功能。8.60 的验证结果不等于对所有补丁、数据库和平台组合的认证。
 
 ### 命令行可以操作哪些定义
 
@@ -95,7 +95,7 @@ python scripts/peoplesoft_api.py record struct JOB
 
 ## English
 
-A PeopleSoft metadata development toolkit for agents and developers. Use the command line to inspect and maintain definitions, PeopleCode, projects, and Integration Broker services. **2.0.1 is the current stable release**; remaining issues will be addressed in subsequent minor and patch releases.
+A PeopleSoft metadata development toolkit for agents and developers. Use the command line to inspect and maintain definitions, PeopleCode, projects, and Integration Broker services. **2.0.2 is the current stable release**; remaining issues will be addressed in subsequent minor and patch releases.
 
 ### Two main deliverables
 
@@ -112,7 +112,7 @@ Request path: `Agent / developer → Skill / CLI or custom client → MetaData A
 |---|---|
 | **8.60** | Primary development version; developed and validated on Oracle / **PeopleTools 8.60.10** |
 | **8.57 and later** | Most features are expected to work; individual releases have not all been tested. Compile, configure, and verify the required features on your target system |
-| **Earlier than 8.57** | **Not tested**; compatibility is not guaranteed |
+| **Earlier than 8.57, including 8.54 / 8.55** | Not yet verified on a live target. Proceed with native import, compilation, and feature checks; the version number alone does not block installation |
 
 These version numbers refer to **PeopleTools**. Validation on 8.60 does not certify every patch, database, or platform combination.
 

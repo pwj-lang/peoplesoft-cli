@@ -2,6 +2,8 @@
 .peoplesoft/
 config.json
 **/config.json
+install.local.json
+.ps-install-*
 *.token
 *.token.json
 

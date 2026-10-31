@@ -2,7 +2,7 @@
 
 当前结构和交付范围见 [架构与交付边界](architecture.md)。下文按轮次给出的工程数量属于历史验收基线；安装以随包原生 XML / INI 的实际清单为准。
 
-MetaData API 是本项目的主要交付物之一。Agent 或开发者必须先把完整工程部署到目标 PeopleSoft，配置 Integration Broker、认证及权限，再使用 Skill / CLI 或其他 API 客户端；仅安装 Skill 不会自动部署服务端。主要开发版本为 PeopleTools 8.60（Oracle / 8.60.10 验证），8.57 及更新版本大部分功能预期可用，早于 8.57 未测试。
+MetaData API 是本项目的主要交付物之一。Agent 先把完整工程部署到目标 PeopleSoft，配置 Integration Broker、认证及权限，再使用 Skill / CLI 或其他 API 客户端；仅安装 Skill 不会自动部署服务端。主要开发版本为 PeopleTools 8.60（Oracle / 8.60.10 验证），其他版本含 8.54/8.55 按目标编译和功能验证；未验证不等于不支持，不以 8.57 划硬门槛。
 
 ## 读写分离（2026-10-30）
 
@@ -50,7 +50,7 @@ python scripts/peoplesoft_api.py healthcheck --refresh
 
 `env layout` 查看当前环境的 `metadata_api_layout`；`env layout legacy` 用于尚未迁移的旧环境。未配置的已有环境默认 legacy，只有 panwx25 已切换 split。split 不会在 Read 接口未部署、403 或网络错误时回退旧混合入口。基本 healthcheck 仅验证认证与20个读取操作，因此只读账号可以通过；它不声称写权限可用。
 
-升级要同时导入完整新编译工程、迁移旧入口及设置目标许可权，然后切换 CLI 布局。原生工程含旧类/服务的 Delete 迁移键；不要只更新脚本或只移动 Service。权限列表本身不随核心工程迁移，目标环境必须重新按所需操作授权。历史安装/验收段落中的“URI/权限不变”仅描述当时的版本保护更新，不适用于本次拆分。
+升级要同时导入完整新编译工程、迁移旧入口及核对目标许可权，然后切换 CLI 布局。原生工程含旧类/服务的 Delete 迁移键；不要只更新脚本或只移动 Service。2.0.1 历史发行包不含预置许可权；新的安全交付包含工具专用许可权及角色，Agent 按 [安装发现流程](install-discovery.md#预置许可权和角色) 导入并核对，用户只分配对应角色。不能仅凭操作迁移就断言用户已授权。历史安装/验收段落中的“URI/权限不变”仅描述当时的版本保护更新，不适用于本次拆分。
 
 panwx25 读写拆分当轮验收（历史基线）：320项直接API/CLI路由检查、真实Field CRUD及版本/撤权恢复；Postman 119请求/202断言；20项读取健康检查。完整原生工程277迁移条目、270实例、74程序、71必需类，已核对51个新类的源码和编译内容，恢复203项导出标记。未新增AD/PIA界面或跨环境回导验收。
 
@@ -64,13 +64,13 @@ Service 删除增补需同时安装新版 NativeAdapter、ManagedVersion、MetaD
 
 ## 公共调用规则
 
-CLI 负责环境、PS_TOKEN 和文本编码。直接调用 REST 时使用 `Content-Type: application/json`、`PS_TOKEN`；接口地址中的 `PSFT_HR` 换成目标环境节点。通常返回 `code/message/data`，`code=0` 表示请求成功，实际写入还须独立回读。各接口的正文编码及特殊返回结构见对应文档。所有子命令支持 `--timeout <秒>` 限制单个 API 请求的超时（默认不限；网关无响应时使用）。
+CLI 负责环境、PS_TOKEN 和文本编码。直接调用 REST 时使用 `Content-Type: application/json`、`PS_TOKEN`；节点默认固定使用 `PSFT_HR`，普通安装无需查询或确认，仅已有自定义配置或用户明确指定时覆盖。通常返回 `code/message/data`，`code=0` 表示请求成功，实际写入还须独立回读。各接口的正文编码及特殊返回结构见对应文档。所有子命令支持 `--timeout <秒>` 限制单个 API 请求的超时（默认不限；网关无响应时使用）。
 
 ## 安装
 
 首次安装及新环境部署先按 [完整安装流程](../INSTALL.md) 执行。尚未部署的 API 不能用于安装自身，先通过原生 AD 导入；已有服务时可先运行 `preflight --refresh` 判断缺项。路由缺失时核对接口部署；180/74“找不到类”核对 Handler 与完整包，不按授权失败处理。
 
-导入使用根目录下 `C_META_DATA_PKG/` 的 XML/INI。公开发行包仅把 38 处环境专属 OPRM.RestBaseurl 主机替换为 `https://ps.example.invalid`，PeopleCode 源码及编译内容保持原生导出；目标安装必须按实际节点和主机配置 REST BaseURL，且不能照搬占位地址。核实 pside.exe 路径、数据库类型/名称、PeopleSoft 用户及 TOOLSREL；Oracle 数据库连接名可参考本机 tnsnames.ora。凭据只从配置读入内存，不写入脚本、日志或回复。
+导入使用根目录下 `C_META_DATA_PKG/` 的 XML/INI。公开发行包仅把 38 处环境专属 OPRM.RestBaseurl 主机替换为 `https://ps.example.invalid`，PeopleCode 源码及编译内容保持原生导出；目标安装按实际主机配置 REST BaseURL，节点默认沿用 `PSFT_HR`，不能照搬占位地址。核实 pside.exe 路径、数据库类型/名称、PeopleSoft 用户及 TOOLSREL；Oracle 数据库连接名可参考本机 tnsnames.ora。凭据只从配置读入内存，不写入脚本、日志或回复。
 
 下面变量使用实际配置；`$psFileRoot` 是包含项目目录的父目录，不能直接指向 XML 或 `C_META_DATA_PKG` 目录。日志目录需先创建。
 
@@ -126,7 +126,7 @@ python scripts/peoplesoft_api.py env init <环境名> --url <PIA地址> --userna
 
 ## 授权
 
-使用用户已确认的专用 Permission List，不默认选 PTPT1000。已有授权沿用；缺少目标权限列表时才确认。初始安装授权可在已获准的浏览器会话中完成：
+首次安装在已有部署权限的前提下导入预置 `C_PSCLI_READ` / `C_PSCLI_WRITE` 许可权及同名角色；这只交付定义，不会给当前用户名授权。Agent 仅提醒用户或管理员自行分配所需角色，完成后再验证，不根据填写文件选择或分配角色。历史包未包含或缺部署权限时如实说明并提醒管理员处理。已有同名定义先比较，不能覆盖业务定制或成员。下面仅作为安全管理员修复缺项的原生路径参考，常规安装不自动执行。不默认选 PTPT1000；已有授权沿用。
 
 1. 打开 **PeopleTools → 安全性 → 许可权与角色 → 许可权列表**，搜索并打开指定列表。
 2. 切换 **Web 服务** 页签。按所需权限选入 `C_META_DATA_READ`，需要定义写入时再选入 `C_META_DATA_WRITE`；分别编辑所需操作。
@@ -180,7 +180,7 @@ PSTOKEN_GET 与全部 20 个必需操作均为 PASS 才报告基本安装成功�
 | `NativeApi` | 内置JSON解析和输出；原生引用集中在带版本编译指令的NativeApi:JSONStorage |
 | `JavaApi` | org.json的JSONTokener/JSONStringer；应用服务器须已加载兼容目标JVM的org.json jar |
 
-8.55不能一概视为可用：本兼容层沿用项目此前记录，以8.55.11作为启用门槛，8.55.00–8.55.10默认CustomApi。选择依据为目标编译环境的 `#ToolsRel`，不引用旧版可能没有的 `%ToolsRelease`。版本指令语法见[Oracle说明](https://docs.oracle.com/cd/F30998_01/pt858pbr2/eng/pt/tpcl/langref_DirectivePeopleCodeFunctionsAndConstructs.html)。
+本兼容层沿用项目此前记录，以8.55.11作为默认后端切换门槛，8.55.00–8.55.10默认CustomApi；这不是整个工具的最低支持版本。选择依据为目标编译环境的 `#ToolsRel`，不引用旧版可能没有的 `%ToolsRelease`。不能由 PSSTATUS 仅显示8.55推断实际补丁或分支；不要求用户提供补丁号才能继续原生检查。版本指令语法见[Oracle说明](https://docs.oracle.com/cd/F30998_01/pt858pbr2/eng/pt/tpcl/langref_DirectivePeopleCodeFunctionsAndConstructs.html)。
 
 安装者可在 `C_JSON_API:Factory` 修改唯一配置常量 `DefaultBackend`，编译保存后新请求使用指定实现。配置JavaApi前先用一个Factory实例调用 `SetBackend("JavaApi")` 并运行解析/构建检查；缺类或jar时明确失败，不自动换实现。jar必须与应用服务器JVM兼容，修改classpath后按该环境规程重启相关domain。切换后重新获取编辑快照。
 

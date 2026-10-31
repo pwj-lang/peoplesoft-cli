@@ -3,12 +3,12 @@
   <instance class="PJM">
     <rowset name="PjmDefn" size="2856" count="1">
       <row>
-        <szLastUpdDttm>2026-10-31-14.45.07.333241</szLastUpdDttm>
+        <szLastUpdDttm>2026-10-31-20.12.40.679257</szLastUpdDttm>
         <szLastUpdOprId>panwx</szLastUpdOprId>
         <szObjectOwnerID></szObjectOwnerID>
         <nUseCount>1</nUseCount>
         <bUseUpdate>1</bUseUpdate>
-        <lVersion>45115</lVersion>
+        <lVersion>45920</lVersion>
         <lSwapVersion>0</lSwapVersion>
         <nSwapNum>0</nSwapNum>
         <szProjectName>C_META_DATA_PKG</szProjectName>
@@ -16,8 +16,8 @@
         <szProjectDescr>MetaData应用程序包</szProjectDescr>
         <szSrcDBName>PANWX25</szSrcDBName>
         <szSrcOprId>panwx</szSrcOprId>
-        <szSessionId>4c8aed5c-d511-11f1-a836-17d2cb5bab82</szSessionId>
-        <szRunDtTm>2026-10-31-17.56.09.901155</szRunDtTm>
+        <szSessionId>63482db5-d524-11f1-9572-9bf9e7e494cc</szSessionId>
+        <szRunDtTm>2026-10-31-20.12.48.034814</szRunDtTm>
         <szTgtServerName></szTgtServerName>
         <szTgtDBName></szTgtDBName>
         <szTgtOprId></szTgtOprId>
@@ -40,9 +40,9 @@
             </row>
           </rowset>
         </hDescrLong>
-        <nProjectCount>301</nProjectCount>
+        <nProjectCount>303</nProjectCount>
         <lpPit> POINTER
-          <rowset name="PjmPit" size="257656" count="301">
+          <rowset name="PjmPit" size="259368" count="303">
             <row>
               <eObjectType>0</eObjectType>
               <szObjectValue_0>C_AE_ACTION_SEQ</szObjectValue_0>
@@ -203,6 +203,42 @@
               <eUpgradeAction>0</eUpgradeAction>
               <bTakeAction>1</bTakeAction>
               <bCopyDone>1</bCopyDone>
+              <eRowStatus>3</eRowStatus>
+            </row>
+            <row>
+              <eObjectType>53</eObjectType>
+              <szObjectValue_0>C_PSCLI_READ</szObjectValue_0>
+              <szObjectValue_1></szObjectValue_1>
+              <szObjectValue_2></szObjectValue_2>
+              <szObjectValue_3></szObjectValue_3>
+              <eObjectID_0>89</eObjectID_0>
+              <eObjectID_1>0</eObjectID_1>
+              <eObjectID_2>0</eObjectID_2>
+              <eObjectID_3>0</eObjectID_3>
+              <bExecute>0</bExecute>
+              <eSourceStatus>0</eSourceStatus>
+              <eTargetStatus>0</eTargetStatus>
+              <eUpgradeAction>0</eUpgradeAction>
+              <bTakeAction>1</bTakeAction>
+              <bCopyDone>0</bCopyDone>
+              <eRowStatus>3</eRowStatus>
+            </row>
+            <row>
+              <eObjectType>53</eObjectType>
+              <szObjectValue_0>C_PSCLI_WRITE</szObjectValue_0>
+              <szObjectValue_1></szObjectValue_1>
+              <szObjectValue_2></szObjectValue_2>
+              <szObjectValue_3></szObjectValue_3>
+              <eObjectID_0>89</eObjectID_0>
+              <eObjectID_1>0</eObjectID_1>
+              <eObjectID_2>0</eObjectID_2>
+              <eObjectID_3>0</eObjectID_3>
+              <bExecute>0</bExecute>
+              <eSourceStatus>0</eSourceStatus>
+              <eTargetStatus>0</eTargetStatus>
+              <eUpgradeAction>0</eUpgradeAction>
+              <bTakeAction>1</bTakeAction>
+              <bCopyDone>0</bCopyDone>
               <eRowStatus>3</eRowStatus>
             </row>
             <row>
@@ -16212,6 +16248,478 @@ This field is used in PSDBFLDLABL and PSDBFLDLABLLANG.</hDescrLong>
         </lpStmtT>
         <nSqlTextCount>0</nSqlTextCount>
         <lpSqlText>POINTER</lpSqlText>
+      </row>
+    </rowset>
+  </instance>
+  <instance class="CLM">
+    <rowset name="ClmDefn" size="824" count="1">
+      <row>
+        <szLastUpdDttm>2026-10-31-20.11.50.906961</szLastUpdDttm>
+        <szLastUpdOprId>panwx</szLastUpdOprId>
+        <nUseCount>1</nUseCount>
+        <bUseUpdate>1</bUseUpdate>
+        <lVersion>533</lVersion>
+        <lSwapVersion>0</lSwapVersion>
+        <nSwapNum>0</nSwapNum>
+        <szClassId>C_PSCLI_READ</szClassId>
+        <szLanguageCd>ZHS</szLanguageCd>
+        <szClassDefnDescr>C_PSCLI_READ</szClassDefnDescr>
+        <nTimeOutMinutes>0</nTimeOutMinutes>
+        <nAuthSignonCount>0</nAuthSignonCount>
+        <nAuthItemCount>0</nAuthItemCount>
+        <nAuthPrcsCount>0</nAuthPrcsCount>
+        <nPrcsProfile>1</nPrcsProfile>
+        <nAuthCubeCount>0</nAuthCubeCount>
+        <nBusCompCount>2</nBusCompCount>
+        <nAuthQueueCount>0</nAuthQueueCount>
+        <nMobilePageCount>0</nMobilePageCount>
+        <nQueryCount>0</nQueryCount>
+        <nAccGrpCount>0</nAccGrpCount>
+        <nOptnCount>0</nOptnCount>
+        <hAst>HANDLE</hAst>
+        <hAit>HANDLE</hAit>
+        <hPgt>HANDLE</hPgt>
+        <hAct>HANDLE</hAct>
+        <hBct> HANDLE
+          <rowset name="ClmAuthBusComp" size="256" count="2">
+            <row>
+              <szBusCompName>MESSAGE_CATALOG_CI</szBusCompName>
+              <szBusCompMethod>Cancel</szBusCompMethod>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szBusCompName>MESSAGE_CATALOG_CI</szBusCompName>
+              <szBusCompMethod>Get</szBusCompMethod>
+              <nAuthActions>4</nAuthActions>
+            </row>
+          </rowset>
+        </hBct>
+        <hAqt>HANDLE</hAqt>
+        <hAmp>HANDLE</hAmp>
+        <hQry>HANDLE</hQry>
+        <hAccGrp>HANDLE</hAccGrp>
+        <hOptn>HANDLE</hOptn>
+        <lpPrcsProfile> POINTER
+          <rowset name="ClmPrcsProfile" size="1168" count="1">
+            <row>
+              <szServerDestFile></szServerDestFile>
+              <szServerDestPrinter></szServerDestPrinter>
+              <szClientDestFile></szClientDestFile>
+              <szClientDestPrinter></szClientDestPrinter>
+              <bOvrdOutDest>0</bOvrdOutDest>
+              <bOvrdSrvrParms>0</bOvrdSrvrParms>
+              <eRqstStatusUpd>1</eRqstStatusUpd>
+              <eRqstStatusView>2</eRqstStatusView>
+              <bSrvrStatusUpd>0</bSrvrStatusUpd>
+              <bSrvrStatusView>1</bSrvrStatusView>
+              <szMvsJobName></szMvsJobName>
+              <szMvsJobAcct></szMvsJobAcct>
+              <bRecurUpd>1</bRecurUpd>
+              <szWavefileName></szWavefileName>
+              <bAuthorized>0</bAuthorized>
+            </row>
+          </rowset>
+        </lpPrcsProfile>
+        <szDefaultBPM></szDefaultBPM>
+        <bStartAppServer>0</bStartAppServer>
+        <bAllowPswdEmail>0</bAllowPswdEmail>
+        <nDelMenuCount>0</nDelMenuCount>
+        <bEnableMonitor>0</bEnableMonitor>
+        <nAuthWSOperationCount>21</nAuthWSOperationCount>
+        <hAwst> HANDLE
+          <rowset name="ClmAuthWSOperation" size="1428" count="21">
+            <row>
+              <szWSOperationName>AI_EXEC_SQL_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_LIST_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_QUERY_RECORD_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_APP_ENGINE_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_APP_PKG_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_CI_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_COMPONENT_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_FIELD_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_HTML_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_MENU_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_MESSAGE_CATALOG_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_PAGE_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_PORTAL_REGISTRY_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_PROJECT_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_RECORD_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_SERVICE_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_SERVICE_OP_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_SQL_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_STYLESHEET_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_SEARCH_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>PSTOKEN_GET</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+          </rowset>
+        </hAwst>
+        <nAuthCBAppCount>0</nAuthCBAppCount>
+        <hAcbt>HANDLE</hAcbt>
+        <nAuthAppSrvCount>0</nAuthAppSrvCount>
+        <hApSrvt>HANDLE</hApSrvt>
+        <nAuthAdsPrcsCount>0</nAuthAdsPrcsCount>
+        <hAuthAdsPrcs>HANDLE</hAuthAdsPrcs>
+        <nAdsAccGrpCount>0</nAdsAccGrpCount>
+        <hAdsAccGrp>HANDLE</hAdsAccGrp>
+        <nSearchGroupCount>0</nSearchGroupCount>
+        <hSearchGroup>HANDLE</hSearchGroup>
+        <nLangCount>1</nLangCount>
+        <hLang> HANDLE
+          <rowset name="ClmDefnLang" size="70" count="1">
+            <row>
+              <szLanguageCd></szLanguageCd>
+              <szClassDefnDescr></szClassDefnDescr>
+            </row>
+          </rowset>
+        </hLang>
+        <nOriginCount>1</nOriginCount>
+        <hOrigin> HANDLE
+          <rowset name="ClmDefnOrigin" size="64" count="1">
+            <row>
+              <cOriginType>C</cOriginType>
+              <szOriginClassId>C_PSCLI_READ</szOriginClassId>
+            </row>
+          </rowset>
+        </hOrigin>
+      </row>
+    </rowset>
+  </instance>
+  <instance class="CLM">
+    <rowset name="ClmDefn" size="824" count="1">
+      <row>
+        <szLastUpdDttm>2026-10-31-20.11.50.679646</szLastUpdDttm>
+        <szLastUpdOprId>panwx</szLastUpdOprId>
+        <nUseCount>1</nUseCount>
+        <bUseUpdate>1</bUseUpdate>
+        <lVersion>534</lVersion>
+        <lSwapVersion>0</lSwapVersion>
+        <nSwapNum>0</nSwapNum>
+        <szClassId>C_PSCLI_WRITE</szClassId>
+        <szLanguageCd>ZHS</szLanguageCd>
+        <szClassDefnDescr>C_PSCLI_WRITE</szClassDefnDescr>
+        <nTimeOutMinutes>0</nTimeOutMinutes>
+        <nAuthSignonCount>0</nAuthSignonCount>
+        <nAuthItemCount>0</nAuthItemCount>
+        <nAuthPrcsCount>0</nAuthPrcsCount>
+        <nPrcsProfile>1</nPrcsProfile>
+        <nAuthCubeCount>0</nAuthCubeCount>
+        <nBusCompCount>6</nBusCompCount>
+        <nAuthQueueCount>0</nAuthQueueCount>
+        <nMobilePageCount>0</nMobilePageCount>
+        <nQueryCount>0</nQueryCount>
+        <nAccGrpCount>0</nAccGrpCount>
+        <nOptnCount>0</nOptnCount>
+        <hAst>HANDLE</hAst>
+        <hAit>HANDLE</hAit>
+        <hPgt>HANDLE</hPgt>
+        <hAct>HANDLE</hAct>
+        <hBct> HANDLE
+          <rowset name="ClmAuthBusComp" size="768" count="6">
+            <row>
+              <szBusCompName>MESSAGE_CATALOG_CI</szBusCompName>
+              <szBusCompMethod>AddMessage</szBusCompMethod>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szBusCompName>MESSAGE_CATALOG_CI</szBusCompName>
+              <szBusCompMethod>Cancel</szBusCompMethod>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szBusCompName>MESSAGE_CATALOG_CI</szBusCompName>
+              <szBusCompMethod>Create</szBusCompMethod>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szBusCompName>MESSAGE_CATALOG_CI</szBusCompName>
+              <szBusCompMethod>DeleteMessage</szBusCompMethod>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szBusCompName>MESSAGE_CATALOG_CI</szBusCompName>
+              <szBusCompMethod>Get</szBusCompMethod>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szBusCompName>MESSAGE_CATALOG_CI</szBusCompName>
+              <szBusCompMethod>Save</szBusCompMethod>
+              <nAuthActions>4</nAuthActions>
+            </row>
+          </rowset>
+        </hBct>
+        <hAqt>HANDLE</hAqt>
+        <hAmp>HANDLE</hAmp>
+        <hQry>HANDLE</hQry>
+        <hAccGrp>HANDLE</hAccGrp>
+        <hOptn>HANDLE</hOptn>
+        <lpPrcsProfile> POINTER
+          <rowset name="ClmPrcsProfile" size="1168" count="1">
+            <row>
+              <szServerDestFile></szServerDestFile>
+              <szServerDestPrinter></szServerDestPrinter>
+              <szClientDestFile></szClientDestFile>
+              <szClientDestPrinter></szClientDestPrinter>
+              <bOvrdOutDest>0</bOvrdOutDest>
+              <bOvrdSrvrParms>0</bOvrdSrvrParms>
+              <eRqstStatusUpd>1</eRqstStatusUpd>
+              <eRqstStatusView>2</eRqstStatusView>
+              <bSrvrStatusUpd>0</bSrvrStatusUpd>
+              <bSrvrStatusView>1</bSrvrStatusView>
+              <szMvsJobName></szMvsJobName>
+              <szMvsJobAcct></szMvsJobAcct>
+              <bRecurUpd>1</bRecurUpd>
+              <szWavefileName></szWavefileName>
+              <bAuthorized>0</bAuthorized>
+            </row>
+          </rowset>
+        </lpPrcsProfile>
+        <szDefaultBPM></szDefaultBPM>
+        <bStartAppServer>0</bStartAppServer>
+        <bAllowPswdEmail>0</bAllowPswdEmail>
+        <nDelMenuCount>0</nDelMenuCount>
+        <bEnableMonitor>0</bEnableMonitor>
+        <nAuthWSOperationCount>37</nAuthWSOperationCount>
+        <hAwst> HANDLE
+          <rowset name="ClmAuthWSOperation" size="2516" count="37">
+            <row>
+              <szWSOperationName>AI_EXEC_SQL_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_LIST_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_APP_ENGINE_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_APP_PKG_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_CI_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_COMPONENT_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_FIELD_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_HTML_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_MENU_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_MESSAGE_CATALOG_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_PAGE_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_PORTAL_REGISTRY_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_PROJECT_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_RECORD_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_SERVICE_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_SERVICE_OP_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_SQL_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_OPER_STYLESHEET_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_QUERY_RECORD_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_APP_ENGINE_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_APP_PKG_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_CI_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_COMPONENT_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_FIELD_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_HTML_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_MENU_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_MESSAGE_CATALOG_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_PAGE_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_PORTAL_REGISTRY_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_PROJECT_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_RECORD_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_SERVICE_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_SERVICE_OP_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_SQL_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_READ_STYLESHEET_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>AI_SEARCH_DEFN_POST</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+            <row>
+              <szWSOperationName>PSTOKEN_GET</szWSOperationName>
+              <nAuthActions>4</nAuthActions>
+            </row>
+          </rowset>
+        </hAwst>
+        <nAuthCBAppCount>0</nAuthCBAppCount>
+        <hAcbt>HANDLE</hAcbt>
+        <nAuthAppSrvCount>0</nAuthAppSrvCount>
+        <hApSrvt>HANDLE</hApSrvt>
+        <nAuthAdsPrcsCount>0</nAuthAdsPrcsCount>
+        <hAuthAdsPrcs>HANDLE</hAuthAdsPrcs>
+        <nAdsAccGrpCount>0</nAdsAccGrpCount>
+        <hAdsAccGrp>HANDLE</hAdsAccGrp>
+        <nSearchGroupCount>0</nSearchGroupCount>
+        <hSearchGroup>HANDLE</hSearchGroup>
+        <nLangCount>1</nLangCount>
+        <hLang> HANDLE
+          <rowset name="ClmDefnLang" size="70" count="1">
+            <row>
+              <szLanguageCd></szLanguageCd>
+              <szClassDefnDescr></szClassDefnDescr>
+            </row>
+          </rowset>
+        </hLang>
+        <nOriginCount>1</nOriginCount>
+        <hOrigin> HANDLE
+          <rowset name="ClmDefnOrigin" size="64" count="1">
+            <row>
+              <cOriginType>C</cOriginType>
+              <szOriginClassId>C_PSCLI_WRITE</szOriginClassId>
+            </row>
+          </rowset>
+        </hOrigin>
       </row>
     </rowset>
   </instance>
@@ -63661,12 +64169,12 @@ end-method;
   <instance class="SRVM">
     <rowset name="Service" size="2000" count="1">
       <row>
-        <szLastUpdDttm>2026-10-30-10.04.59.399770</szLastUpdDttm>
+        <szLastUpdDttm>2026-10-31-20.12.24.906913</szLastUpdDttm>
         <szLastUpdOprId>panwx</szLastUpdOprId>
         <szObjectOwnerId></szObjectOwnerId>
         <nUseCount>1</nUseCount>
         <bUseUpdate>1</bUseUpdate>
-        <lVersion>252</lVersion>
+        <lVersion>288</lVersion>
         <lSwapVersion>0</lSwapVersion>
         <nSwapNum>0</nSwapNum>
         <szIb_servicename>C_META_DATA_WRITE</szIb_servicename>
