@@ -2,6 +2,16 @@
 
 [中文](#中文) · [English](#english) · [2.0.1 Release](https://github.com/pwj-lang/peoplesoft-cli/releases/tag/v.2.0.1)
 
+## 让 Agent 安装 / Install with an agent
+
+把下面这一句交给 Agent 即可，无需另存长提示词：
+
+> 请安装并部署到我的 PeopleSoft 环境：https://github.com/pwj-lang/peoplesoft-cli
+
+Agent 从 [INSTALL.md](INSTALL.md) 读取本地 Skill 安装、原生工程导入、编译、IB 配置、授权和验收流程，先发现已有配置，只询问缺失项。若只需本地 Skill，在请求中说明“只安装本地”。首次部署仍需要可用的目标环境、AD 客户端和相应账号权限。
+
+Give your agent this repository URL and ask it to install and deploy. The agent should follow [INSTALL.md](INSTALL.md), discover existing settings, and ask only for missing information. Say “local skill only” if server deployment is not needed.
+
 ## 中文
 
 面向 Agent 和开发者的 PeopleSoft 元数据开发工具，通过命令行查询和维护定义、PeopleCode、工程及 Integration Broker 服务。当前正式版为 **2.0.1**，已知问题将在后续小版本中持续修复。
@@ -11,7 +21,7 @@
 - **ps-cli Skill / CLI**：Agent 开发指引、命令行工具、接口参考和请求示例，开发者也可以直接运行。
 - **MetaData API**：部署在 PeopleSoft 内的服务端 API，通过 Integration Broker 提供元数据能力。随包的 `C_META_DATA_PKG/` 是完整 Application Designer 原生 XML / INI 工程，包含 PeopleCode 源码、编译内容和运行依赖。
 
-**Agent 或开发者必须先自行将 MetaData API 部署到目标 PeopleSoft 系统，并配置 Integration Broker、认证和权限，才能使用 CLI 或直接调用 API。仅安装 Skill 不会自动部署服务端。** API 也可以独立于 Skill，由其他客户端调用。
+**使用 CLI 前需将 MetaData API 部署到目标 PeopleSoft，并配置 Integration Broker、认证和权限。** Agent 可按 [完整安装流程](INSTALL.md) 执行这两部分；只复制 Skill 文件不会部署服务端。API 也可以独立于 Skill，由其他客户端调用。
 
 调用关系：`Agent / 开发者 → Skill / CLI 或自有客户端 → MetaData API → PeopleSoft 定义`。
 
@@ -92,7 +102,7 @@ A PeopleSoft metadata development toolkit for agents and developers. Use the com
 - **ps-cli Skill / CLI**: agent instructions, command-line tools, API references, and request examples. Developers can also run the CLI directly.
 - **MetaData API**: server-side APIs running inside PeopleSoft and exposed through Integration Broker. The included `C_META_DATA_PKG/` Application Designer XML / INI project contains PeopleCode source, compiled content, and runtime dependencies.
 
-**An agent or developer must deploy the MetaData API to the target PeopleSoft system and configure Integration Broker, authentication, and permissions before using the CLI or calling the APIs. Installing the Skill alone does not deploy the server-side APIs.** Other clients can use the APIs independently of the Skill.
+**Deploy the MetaData API and configure Integration Broker, authentication, and permissions before using the CLI.** An agent can follow the [complete installation workflow](INSTALL.md) for both parts; copying Skill files alone does not deploy the server. Other clients can use the APIs independently of the Skill.
 
 Request path: `Agent / developer → Skill / CLI or custom client → MetaData API → PeopleSoft definitions`.
 

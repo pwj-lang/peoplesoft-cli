@@ -68,7 +68,7 @@ CLI 负责环境、PS_TOKEN 和文本编码。直接调用 REST 时使用 `Conte
 
 ## 安装
 
-先运行 `preflight --refresh`。路由缺失时核对接口部署；180/74“找不到类”核对 Handler 与完整包，不按授权失败处理。
+首次安装及新环境部署先按 [完整安装流程](../INSTALL.md) 执行。尚未部署的 API 不能用于安装自身，先通过原生 AD 导入；已有服务时可先运行 `preflight --refresh` 判断缺项。路由缺失时核对接口部署；180/74“找不到类”核对 Handler 与完整包，不按授权失败处理。
 
 导入使用根目录下 `C_META_DATA_PKG/` 的 XML/INI。公开发行包仅把 38 处环境专属 OPRM.RestBaseurl 主机替换为 `https://ps.example.invalid`，PeopleCode 源码及编译内容保持原生导出；目标安装必须按实际节点和主机配置 REST BaseURL，且不能照搬占位地址。核实 pside.exe 路径、数据库类型/名称、PeopleSoft 用户及 TOOLSREL；Oracle 数据库连接名可参考本机 tnsnames.ora。凭据只从配置读入内存，不写入脚本、日志或回复。
 
@@ -167,7 +167,7 @@ PSTOKEN_GET 与全部 20 个必需操作均为 PASS 才报告基本安装成功�
 
 已部署且已授权的 `service-op set-permission` 可为指定现有列表设置某个同步 SOAP / REST Provider 操作的 Full/None，见 [服务操作](12-service-defn-api.md#服务操作)；它不能创建列表或代替初始授权。
 
-独立消息翻译还需完整导入工程内的 `C_META_MSG_LANG` Page、Component/GBL、Component Interface 和 SavePreChange PeopleCode，以及 `CatalogLanguageAdapter`。执行账户需取得该 CI 的 Get/Save 权限；沿用目标环境已有权限列表，按需配置，不扩大其他 CI 权限。只有新版 CLI 或只有处理类都不足以启用翻译写入。翻译通过现有消息目录 REST 操作进入，不增加基本健康检查操作数。
+消息基准维护与独立翻译复用目标系统的 `MESSAGE_CATALOG1` / `MESSAGE_CATALOG_CI`，并依赖工程内新版 `CatalogLanguageAdapter` 及消息处理类。按实际调用核对标准 CI 的 Get/Save 等必要方法权限，沿用已确认的权限列表，不扩大其他 CI 权限；已退役的 `C_META_MSG_LANG` 页面、组件、CI 和 SavePreChange 不再是安装依赖。只有新版 CLI 或只有处理类都不足以启用翻译写入。翻译通过现有消息目录 REST 操作进入，不增加基本健康检查操作数。详见 [消息目录](15-message-catalog-api.md)。
 
 ## JSON 兼容层（2026-10-30）
 

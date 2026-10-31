@@ -11,6 +11,8 @@ metadata:
 
 通过 Integration Broker REST API 查询和维护 PeopleSoft 定义、PeopleCode、工程及服务配置；支持业务数据/SQL 查询，SQL DML 单独授权。当前正式版为 **2.0.1**，遗留问题后续通过小版本修复。除 Skill / CLI 外，主要交付物是 MetaData API；Agent 或开发者须先自行把完整工程部署到目标 PeopleSoft 并配置认证、路由与权限，才能使用。API 也可由其他客户端独立调用。
 
+用户要求安装本 Skill、导入新环境或部署服务端时，先按 [INSTALL.md](INSTALL.md) 执行：发现已有配置、只询问缺失项，使用同一稳定版 CLI 与原生工程完成适用的部署和验收。首次部署从原生 AD 工程开始，不能依赖尚未安装的 API 自举；明确的本地安装请求仅安装本地。
+
 实际开发或审查前读取 [开发规范](references/development-standards.md)，再按下表读取相关对象文档。部署、依赖和工具维护先读 [架构与交付边界](references/architecture.md)。
 
 ps-cli 负责以 Application Designer 为主的开发定义，包含 Field XLAT、Record、Page、Component、PeopleCode 和 AE 程序。角色/许可权、用户授权、Process Definition、进程组及 Scheduler 的日常管理留给后续独立 ps-admin skill；AD 可以迁移这些配置，不表示 ps-cli 必须承担其管理。Project 迁移能力和 API 自身的授权校验继续保留。
@@ -56,7 +58,8 @@ python scripts/peoplesoft_api.py project struct MY_PROJECT
 
 | 任务 | 参考 |
 |---|---|
-| 安装、认证、读写权限、原生导入导出 | [安装与授权](references/01-auth-api.md) |
+| 安装 Skill、部署到新环境并验收 | [Agent 完整安装流程](INSTALL.md) |
+| 认证、读写权限、原生导入导出参数 | [安装与授权](references/01-auth-api.md) |
 | 维护工具、理解入口和公共依赖 | [架构与交付边界](references/architecture.md) |
 | 搜索定义 | [搜索](references/02-search-defn-api.md) |
 | 应用包、类与类代码 | [应用包](references/03-app-pkg-api.md) |
