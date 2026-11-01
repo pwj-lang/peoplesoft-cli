@@ -3,13 +3,13 @@ name: ps-cli
 description: "用 CLI 查询、创建和修改 PeopleSoft 定义；用于 PeopleCode、Application Designer 开发与排障"
 license: "原创内容采用 MIT；适用范围见 LICENSE 和 NOTICE.md"
 metadata:
-  version: 2.0.2
+  version: 2.0.3
   tags: [ps, peoplesoft, peoplecode, app-designer]
 ---
 
 # PeopleSoft CLI
 
-通过 Integration Broker REST API 查询和维护 PeopleSoft 定义、PeopleCode、工程及服务配置；支持业务数据/SQL 查询，SQL DML 单独授权。当前正式版为 **2.0.2**，遗留问题后续通过小版本修复。除 Skill / CLI 外，主要交付物是 MetaData API；Agent 或开发者须先自行把完整工程部署到目标 PeopleSoft 并配置认证、路由与权限，才能使用。API 也可由其他客户端独立调用。
+通过 Integration Broker REST API 查询和维护 PeopleSoft 定义、PeopleCode、工程及服务配置；支持业务数据/SQL 查询，SQL DML 单独授权。当前正式版为 **2.0.3**，遗留问题后续通过小版本修复。除 Skill / CLI 外，主要交付物是 MetaData API；Agent 或开发者须先自行把完整工程部署到目标 PeopleSoft 并配置认证、路由与权限，才能使用。API 也可由其他客户端独立调用。
 
 用户要求安装本 Skill、导入新环境或部署服务端时，先按 [INSTALL.md](INSTALL.md) 执行：根目录 [install.example.json](install.example.json) 提供多环境模板，Agent 复制为本机 `install.local.json` 并给实际链接；用户只填需要的环境登录地址、用户名/密码，active_environment 可选择当前环境。完全空白的环境自动跳过，其余全部校验后一次合并，保留未列出的已有环境；任一已填写环境有误则全部不写入。重复安装保留填写内容与未变化的配置，安装助手 run 逐环境验收不切换用户当前环境；中断后核实状态继续。节点默认固定使用 `PSFT_HR`，不询问、不自动发现、不等待确认；已有自定义节点保留，高级覆盖仅按用户明确要求使用。Agent 发现 AD/目标版本、处理下载/依赖和部署，不要求用户查询版本、理解命令或逐项配置服务权限。填写副本不提交、不打包、不跨安装同步，不因讨论安装体验而创建示例环境。工具自身预置许可权/角色随安装交付；导入后仅提醒用户或管理员自行分配只读/读写角色，Agent 不自行授权、不根据填写文件选择角色，详见 [发现与填写](references/install-discovery.md)。首次部署从同一稳定版原生 AD 工程开始，不能依赖尚未安装的 API 自举；明确的本地安装请求仅安装本地。
 
@@ -81,4 +81,4 @@ AD 导出 XML/INI 按原始字节交付，包括来源环境地址；不替换�
 | 未解决问题、未验收和延期范围 | [已知问题](references/known-code-issues.md) |
 | 版本、分批交付与发行条件 | [发布规划](references/release-roadmap.md) |
 
-主要开发版本为 PeopleTools 8.60，已在 Oracle / 8.60.10 验证；2.0.2 发布后的维护源已在 Oracle / 8.55 验收部分读取、Service 长描述及版本保护，范围见 [PeopleTools 兼容记录](references/peopletools-compatibility.md)。其他功能、版本及补丁按目标编译、配置和所需功能逐项验证，不以 8.57 划硬门槛。“未验证”不等于“不支持”，也不保证大部分功能已经可用；以实际原生错误和验收结果报告可用范围。Page 属性按已有证据每批 10–20 项交付，Fluid 暂缓；SOAP Validation=Y 间歇性 119,40 未关闭；CI 引用和 CI 多语言子结构后置。正式发行不将这些问题或未验收项视为已解决。
+主要开发版本为 PeopleTools 8.60，已在 Oracle / 8.60.10 验证；2.0.3 已在 Oracle / 8.55 验收部分读取、Service 长描述及版本保护，范围见 [PeopleTools 兼容记录](references/peopletools-compatibility.md)。其他功能、版本及补丁按目标编译、配置和所需功能逐项验证，不以 8.57 划硬门槛。“未验证”不等于“不支持”，也不保证大部分功能已经可用；以实际原生错误和验收结果报告可用范围。Page 属性按已有证据每批 10–20 项交付，Fluid 暂缓；SOAP Validation=Y 间歇性 119,40 未关闭；CI 引用和 CI 多语言子结构后置。正式发行不将这些问题或未验收项视为已解决。

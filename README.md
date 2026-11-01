@@ -1,12 +1,12 @@
 # PeopleSoft Vibe Coding 工具
 
-[中文](#中文) · [English](#english) · [2.0.2 Release](https://github.com/pwj-lang/peoplesoft-cli/releases/tag/v.2.0.2)
+[中文](#中文) · [English](#english) · [2.0.3 Release](https://github.com/pwj-lang/peoplesoft-cli/releases/tag/v.2.0.3)
 
 ## 中文
 
 PeopleSoft Vibe Coding 工具，让你用自然语言与 AI Agent 协作开发 PeopleSoft。Agent 通过 ps-cli 查询现有定义、编写和编译 PeopleCode、维护页面与组件，并将变更登记到 Application Designer 工程中。开发者也可以直接使用命令行完成这些操作。
 
-当前正式版为 **2.0.2**。
+当前正式版为 **2.0.3**。
 
 ### 两个主要交付物
 
@@ -39,7 +39,7 @@ PeopleSoft Vibe Coding 工具，让你用自然语言与 AI Agent 协作开发 P
 |---|---|
 | **8.60** | 主要开发版本；实际开发和验证环境为 Oracle / **PeopleTools 8.60.10** |
 | **8.57 及更新版本** | 大部分功能预期可用；未逐版验证，需在目标环境编译、配置并核验所需功能 |
-| **早于 8.57（含 8.54 / 8.55）** | 2.0.2 发布后的维护源已在 8.55 实测部分读取及 Service 保存，见 [兼容记录](references/peopletools-compatibility.md)；其他功能/版本继续按目标验证，不按版本号直接拒绝 |
+| **早于 8.57（含 8.54 / 8.55）** | 2.0.3 已在 8.55 实测部分读取及 Service 保存，见 [兼容记录](references/peopletools-compatibility.md)；其他功能/版本继续按目标验证，不按版本号直接拒绝 |
 
 这里的版本号指 **PeopleTools**。未验证不等于不支持；兼容性以目标环境的实际结果为准，不能保证任一未测版本的大部分功能。8.60 的验证结果不等于对所有补丁、数据库和平台组合的认证。
 
@@ -105,7 +105,7 @@ python scripts/peoplesoft_api.py record struct JOB
 
 A PeopleSoft Vibe Coding tool for developing PeopleSoft with an AI agent using natural language. Through ps-cli, the agent can inspect existing definitions, write and compile PeopleCode, maintain pages and components, and add changes to Application Designer projects. Developers can also run these commands directly.
 
-The current stable release is **2.0.2**.
+The current stable release is **2.0.3**.
 
 ### Two main deliverables
 
@@ -138,7 +138,7 @@ For a local Skill installation only, use:
 |---|---|
 | **8.60** | Primary development version; developed and validated on Oracle / **PeopleTools 8.60.10** |
 | **8.57 and later** | Most features are expected to work; individual releases have not all been tested. Compile, configure, and verify the required features on your target system |
-| **Earlier than 8.57, including 8.54 / 8.55** | Post-2.0.2 maintenance has limited live 8.55 verification for reads and Service saves; see [compatibility notes](references/peopletools-compatibility.md). Validate other features and versions on the target; the version number alone does not block installation |
+| **Earlier than 8.57, including 8.54 / 8.55** | 2.0.3 has limited live 8.55 verification for reads and Service saves; see [compatibility notes](references/peopletools-compatibility.md). Validate other features and versions on the target; the version number alone does not block installation |
 
 These version numbers refer to **PeopleTools**. Validation on 8.60 does not certify every patch, database, or platform combination.
 
