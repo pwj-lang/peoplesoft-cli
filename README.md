@@ -1,20 +1,12 @@
-# PeopleSoft CLI & MetaData API
+# PeopleSoft Vibe Coding 工具
 
 [中文](#中文) · [English](#english) · [2.0.2 Release](https://github.com/pwj-lang/peoplesoft-cli/releases/tag/v.2.0.2)
 
-## 让 Agent 安装 / Install with an agent
-
-把下面这一句交给 Agent 即可，无需另存长提示词：
-
-> 请安装并部署到我的 PeopleSoft 环境：https://github.com/pwj-lang/peoplesoft-cli
-
-项目根目录提供通用 [多环境安装填写模板](install.example.json)。Agent 复制为同目录的 `install.local.json` 并给出文件链接；在 `environments` 中填写需要的环境登录地址、用户名和密码，不用的环境全部留空即可自动跳过，更多环境可复制一块。`active_environment` 可选择当前环境，留空保留原选择，首次安装留空时用第一个填写完整的环境。Agent 校验已填写环境后批量生成正式配置，再按环境分别导入和验证；重复安装保留填写内容，逐环境检查不切换当前环境。导入后提醒用户或管理员自行分配 `C_PSCLI_READ`（只读）或 `C_PSCLI_WRITE`（读写）角色，完成后再验证权限。**节点默认固定使用 `PSFT_HR`；PeopleTools 版本和 AD 路径由 Agent 发现，用户无需运行命令。** 填写副本不提交、不打包，也不会被同步覆盖。若只需本地 Skill，在请求中说明“只安装本地”。历史发行包是否含新安装助手及预置安全定义以包内文件为准。
-
-Give your agent this repository URL and ask it to install and deploy. The agent copies [install.example.json](install.example.json) to `install.local.json`. Fill the login URL, username, and password for each environment you need; unused blocks can remain completely blank. Set `active_environment` to select one, or leave it empty to keep the current selection (the first completed entry on a fresh install). The agent validates all filled entries before merging them in one write, then verifies each environment without changing your current selection. Repeated setup preserves your input and unchanged configuration. After import, the user or administrator assigns the `C_PSCLI_READ` (read-only) or `C_PSCLI_WRITE` (read/write) role before permission verification. Nodes default to `PSFT_HR`. Local input is excluded from Git, packages, and synchronization. Say “local skill only” if server deployment is not needed.
-
 ## 中文
 
-面向 Agent 和开发者的 PeopleSoft 元数据开发工具，通过命令行查询和维护定义、PeopleCode、工程及 Integration Broker 服务。当前正式版为 **2.0.2**，已知问题将在后续小版本中持续修复。
+PeopleSoft Vibe Coding 工具，让你用自然语言与 AI Agent 协作开发 PeopleSoft。Agent 通过 ps-cli 查询现有定义、编写和编译 PeopleCode、维护页面与组件，并将变更登记到 Application Designer 工程中。开发者也可以直接使用命令行完成这些操作。
+
+当前正式版为 **2.0.2**。
 
 ### 两个主要交付物
 
@@ -24,6 +16,22 @@ Give your agent this repository URL and ask it to install and deploy. The agent 
 **使用 CLI 前需将 MetaData API 部署到目标 PeopleSoft，并配置 Integration Broker、认证和权限。** Agent 可按 [完整安装流程](INSTALL.md) 执行这两部分；只复制 Skill 文件不会部署服务端。API 也可以独立于 Skill，由其他客户端调用。
 
 调用关系：`Agent / 开发者 → Skill / CLI 或自有客户端 → MetaData API → PeopleSoft 定义`。
+
+### 安装 Skill 与部署服务端
+
+把下面这句话交给 Agent，即可开始安装：
+
+> 请安装并部署到我的 PeopleSoft 环境：https://github.com/pwj-lang/peoplesoft-cli
+
+1. Agent 安装本地 Skill，并根据 [多环境填写模板](install.example.json) 准备 `install.local.json`，给出文件链接。
+2. 在文件中填写需要的环境登录地址、用户名和密码，保存后告诉 Agent“填好了”。不用的环境全部留空；`active_environment` 可选择当前环境，留空保留原选择，首次安装时使用第一个填写完整的环境。
+3. Agent 校验配置，按环境部署 MetaData API 并验证。需要授权时，由用户或管理员自行分配 `C_PSCLI_READ`（只读）或 `C_PSCLI_WRITE`（读写）角色，再由 Agent 验证权限。
+
+节点默认使用 `PSFT_HR`，PeopleTools 版本和 AD 路径由 Agent 发现。填写文件不提交、不打包，也不会被同步覆盖；重复安装保留填写内容和未变化的配置，逐环境检查不切换当前环境。完整流程见 [安装指南](INSTALL.md)。
+
+若只需安装本地 Skill，将请求改为：
+
+> 请只安装本地 Skill：https://github.com/pwj-lang/peoplesoft-cli
 
 ### PeopleTools 版本
 
@@ -95,7 +103,9 @@ python scripts/peoplesoft_api.py record struct JOB
 
 ## English
 
-A PeopleSoft metadata development toolkit for agents and developers. Use the command line to inspect and maintain definitions, PeopleCode, projects, and Integration Broker services. **2.0.2 is the current stable release**; remaining issues will be addressed in subsequent minor and patch releases.
+A PeopleSoft Vibe Coding tool for developing PeopleSoft with an AI agent using natural language. Through ps-cli, the agent can inspect existing definitions, write and compile PeopleCode, maintain pages and components, and add changes to Application Designer projects. Developers can also run these commands directly.
+
+The current stable release is **2.0.2**.
 
 ### Two main deliverables
 
@@ -105,6 +115,22 @@ A PeopleSoft metadata development toolkit for agents and developers. Use the com
 **Deploy the MetaData API and configure Integration Broker, authentication, and permissions before using the CLI.** An agent can follow the [complete installation workflow](INSTALL.md) for both parts; copying Skill files alone does not deploy the server. Other clients can use the APIs independently of the Skill.
 
 Request path: `Agent / developer → Skill / CLI or custom client → MetaData API → PeopleSoft definitions`.
+
+### Install the Skill and deploy the server
+
+Give your agent this request to get started:
+
+> Install and deploy this to my PeopleSoft environment: https://github.com/pwj-lang/peoplesoft-cli
+
+1. The agent installs the local Skill, creates `install.local.json` from the [multi-environment template](install.example.json), and gives you a link to the file.
+2. Fill in the login URL, username, and password for each environment you need, save the file, and tell the agent it is ready. Leave unused environments completely blank. Use `active_environment` to select one, or leave it empty to keep the current selection (the first completed entry on a fresh install).
+3. The agent validates the configuration, deploys the MetaData API, and checks each environment. When authorization is needed, the user or administrator assigns the `C_PSCLI_READ` (read-only) or `C_PSCLI_WRITE` (read/write) role before the agent verifies permissions.
+
+Nodes default to `PSFT_HR`; the agent discovers the PeopleTools version and Application Designer path. The local input file is excluded from Git, packages, and synchronization. Repeated installation preserves your input and unchanged configuration, and checks each environment without switching your current selection. See the [installation guide](INSTALL.md) for the full workflow.
+
+For a local Skill installation only, use:
+
+> Install the local Skill only: https://github.com/pwj-lang/peoplesoft-cli
 
 ### PeopleTools compatibility
 
