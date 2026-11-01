@@ -54,6 +54,8 @@ python scripts/peoplesoft_api.py project struct MY_PROJECT
 
 维护工具部署工程 `C_META_DATA_PKG` 时只登记接口及实际运行依赖。电子表格、演示/探针、测试删除键和非运行兼容类留在各自工程；共用 JavaReflect 不意味着所有调用者都应进入核心工程。仅引用且未修改的系统标准 Field 不单独登记；Record 上的 Key/Required 等设置属于 Record，不是全局 Field 修改。消息翻译复用系统 `MESSAGE_CATALOG1` / `MESSAGE_CATALOG_CI`，不重新引入已退役的自建组件。
 
+AD 导出 XML/INI 按原始字节交付，包括来源环境地址；不替换地址、TOOLSREL、源码、编译块或其他内容。定义变更先在 PeopleSoft 完成，再原生导出，复制与打包后核对原文件哈希。
+
 ## 按任务读取
 
 | 任务 | 参考 |
@@ -79,4 +81,4 @@ python scripts/peoplesoft_api.py project struct MY_PROJECT
 | 未解决问题、未验收和延期范围 | [已知问题](references/known-code-issues.md) |
 | 版本、分批交付与发行条件 | [发布规划](references/release-roadmap.md) |
 
-主要开发版本为 PeopleTools 8.60，已在 Oracle / 8.60.10 验证；其他版本（含 8.54/8.55）按目标编译、配置和所需功能逐项验证，不以 8.57 划硬门槛。“未验证”不等于“不支持”，也不保证大部分功能已经可用；以实际原生错误和验收结果报告可用范围。Page 属性按已有证据每批 10–20 项交付，Fluid 暂缓；SOAP Validation=Y 间歇性 119,40 未关闭；CI 引用和 CI 多语言子结构后置。正式发行不将这些问题或未验收项视为已解决。
+主要开发版本为 PeopleTools 8.60，已在 Oracle / 8.60.10 验证；2.0.2 发布后的维护源已在 Oracle / 8.55 验收部分读取、Service 长描述及版本保护，范围见 [PeopleTools 兼容记录](references/peopletools-compatibility.md)。其他功能、版本及补丁按目标编译、配置和所需功能逐项验证，不以 8.57 划硬门槛。“未验证”不等于“不支持”，也不保证大部分功能已经可用；以实际原生错误和验收结果报告可用范围。Page 属性按已有证据每批 10–20 项交付，Fluid 暂缓；SOAP Validation=Y 间歇性 119,40 未关闭；CI 引用和 CI 多语言子结构后置。正式发行不将这些问题或未验收项视为已解决。

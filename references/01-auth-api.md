@@ -70,7 +70,7 @@ CLI 负责环境、PS_TOKEN 和文本编码。直接调用 REST 时使用 `Conte
 
 首次安装及新环境部署先按 [完整安装流程](../INSTALL.md) 执行。尚未部署的 API 不能用于安装自身，先通过原生 AD 导入；已有服务时可先运行 `preflight --refresh` 判断缺项。路由缺失时核对接口部署；180/74“找不到类”核对 Handler 与完整包，不按授权失败处理。
 
-导入使用根目录下 `C_META_DATA_PKG/` 的 XML/INI。公开发行包仅把 38 处环境专属 OPRM.RestBaseurl 主机替换为 `https://ps.example.invalid`，PeopleCode 源码及编译内容保持原生导出；目标安装按实际主机配置 REST BaseURL，节点默认沿用 `PSFT_HR`，不能照搬占位地址。核实 pside.exe 路径、数据库类型/名称、PeopleSoft 用户及 TOOLSREL；Oracle 数据库连接名可参考本机 tnsnames.ora。凭据只从配置读入内存，不写入脚本、日志或回复。
+导入使用根目录下 `C_META_DATA_PKG/` 的 XML/INI，逐字节保留 AD 原始导出，包括来源环境 REST BaseURL；不替换地址、不生成改址副本、不做其他 XML/INI 重写。目标环境发布地址确需调整时，导入后通过 PeopleSoft 原生配置或已授权接口设置并回读，不能编辑导出文件。节点默认沿用 `PSFT_HR`。核实 pside.exe 路径、数据库类型/名称、PeopleSoft 用户及 TOOLSREL；Oracle 数据库连接名可参考本机 tnsnames.ora。凭据只从配置读入内存，不写入脚本、日志或回复。
 
 下面变量使用实际配置；`$psFileRoot` 是包含项目目录的父目录，不能直接指向 XML 或 `C_META_DATA_PKG` 目录。日志目录需先创建。
 

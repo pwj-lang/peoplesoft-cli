@@ -43,7 +43,7 @@ This is the installation entry point for agents. Install the local skill, then d
 
 先复用已经下载且哈希匹配的包。下载设置连接/总时限并观察进度，单次长时间无进展就停止，有限重试后尝试官方可用下载入口或本机既有代理；公共发布包可通过可用镜像取回，但最终必须与官方发布的校验值匹配。不要让用户先配置代理、下载 ZIP 或解压，也不要无限等待同一失败请求。原生 AD/Oracle 客户端不是本包交付物：先自动寻找可用安装和连接别名，确实没有时再说明“需要可用部署工具或部署机器”，不假称只凭 PIA 地址就能首次导入。
 
-新包包含 `assets/security/manifest.json` 时，先运行 `python scripts/verify_install_security.py` 核对原生许可权、操作/CI 权限及角色数据哈希；它只检查交付物，不替代目标导入和用户名授权验收。角色使用 `assets/security/pscli-roles.dat` 与 `roles-import.dms` 配套交付，Agent 在私有工作副本填入路径、检查同名冲突后执行。模板内的路径占位符不能原样执行。
+新包包含 `assets/security/manifest.json` 时，先运行 `python scripts/verify_install_security.py` 核对原生许可权、操作/CI 权限及角色交付；它只检查交付物，不替代目标导入和用户名授权验收。当前维护工程已包含两套角色，导入后分别核对；较旧 AD 客户端可能跳过角色（8.55 已实测），此时才使用同包 `assets/security/pscli-roles.dat` 与 `roles-import.dms` 原生补导。Agent 在私有工作副本填入路径，备份并处理已授权的同名冲突，补导后确认用户成员未变。模板内路径占位符不能原样执行；角色已正确迁移时不重复补导。
 
 2.0.2 发布包包含本指南、安装助手和预置安全交付物。2.0.1 的历史 ZIP 不含这些新增内容。读取 main 的最新指南时留意所选包的实际能力；历史包缺少助手时由 Agent 执行相同发现/私有文件填写流程，不把缺少新工具变成用户需运行旧命令的理由。运行代码、接口参考及工程仍取所选 Release；不要混入 main 脚本、虚构历史包已包含许可权或改写历史 ZIP。
 
@@ -61,6 +61,8 @@ python scripts/peoplesoft_api.py env list
 ## 3. 通过原生 AD 完成首次导入
 
 **尚未安装的 MetaData API 不能用来安装自身。** 已有 API 时可先预检判断版本、路由及缺项；首次部署从随包的 `C_META_DATA_PKG/` 原生 XML/INI 工程开始，通过匹配目标版本的 Application Designer 导入。
+
+工程 XML/INI 必须与 AD 原始导出逐字节一致，包括来源环境地址。安装时直接使用原文件，不生成改址副本，不替换占位地址、TOOLSREL、源码或编译块。导入后的目标环境配置通过 PeopleSoft 原生界面或已授权接口处理。
 
 2.0.2 工程清单为 303 条迁移成员（277 Copy、26 Delete）、297 个原生实例、100 个编译程序及 38 个 Service Operations；相比 2.0.1 增加两套工具许可权，程序及接口实现未变。这些数量是该版本的核对基线；其他版本以自身清单为准。工程包含实际使用的 `C_JSON_API`、`C_COMMONS_PKG` 依赖；只导入同名应用根包会漏掉运行依赖。
 
@@ -90,7 +92,7 @@ python scripts/peoplesoft_api.py env list
 
 ## 5. 配置 Integration Broker 与最小必要权限
 
-节点按本工具约定默认使用 `PSFT_HR`，不将查询或确认节点作为安装前置步骤。Agent 配置目标 Gateway、Service、Operation/版本、URI、Handler、Routing 和 Active 状态；已有自定义节点或用户明确指定时才按覆盖值处理。公开包将 38 处环境专属 REST BaseURL 主机替换为 `https://ps.example.invalid`，必须改成目标实际主机，不能照搬占位地址。
+节点按本工具约定默认使用 `PSFT_HR`，不将查询或确认节点作为安装前置步骤。Agent 配置目标 Gateway、Service、Operation/版本、URI、Handler、Routing 和 Active 状态；已有自定义节点或用户明确指定时才按覆盖值处理。交付工程保留来源环境的原始 REST BaseURL，不改写导出 XML。目标确需不同的发布地址时，通过 PeopleSoft 原生配置或已授权接口设置并独立回读，缺权限时记录待配置；CLI 的连接地址取用户填写的目标环境配置，不能从工程来源地址推断安装目标。
 
 - 元数据读服务：`C_META_DATA_READ`；定义写服务：`C_META_DATA_WRITE`。
 - Token 入口：`PSTOKEN.v1` / `PSTOKEN_GET`，Handler 为 `C_COMMONS_PKG:Login:Login`。服务归属以工程和目标原生定义为准，不能假定 Token 操作就在 Read 服务内。

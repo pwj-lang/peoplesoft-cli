@@ -28,7 +28,9 @@
     "messageCatalogMethods": [
       "Get",
       "Cancel"
-    ]
+    ],
+    "permissionDescription": "PsCli读取许可权",
+    "roleDescription": "PsCli读取角色"
   },
   "write": {
     "permissionList": "C_PSCLI_WRITE",
@@ -79,17 +81,21 @@
       "Save",
       "AddMessage",
       "DeleteMessage"
-    ]
+    ],
+    "permissionDescription": "PsCli写入许可权",
+    "roleDescription": "PsCli写入角色"
   },
   "roleDelivery": {
-    "format": "PeopleSoft Data Mover native export",
+    "format": "PeopleSoft Application Designer XML with native Data Mover fallback",
+    "projectObjectType": 19,
+    "nativeXmlRoles": 2,
     "records": {
       "PSROLEDEFN": 2,
       "PSROLECLASS": 2
     },
-    "sha256": "e8d5dbb979b6e49baaeecf2d78d4e4dab10ceac2cd204aed6bf7093f2ea60220",
-    "userMembersIncluded": false,
-    "sourceSha256": "d1c5bd77851fa2a7889a8bca4697c89ab287e3c20967c61ea3113d9b17ff192c",
-    "publicProjection": "Only the REM Database comment is replaced; all native record data is unchanged"
+    "sha256": "5cbd3122c72ec13f3d2a1d3a2c353d5fc9a63bafcea06b6aee129af041f0c4a7",
+    "sourceSha256": "5cbd3122c72ec13f3d2a1d3a2c353d5fc9a63bafcea06b6aee129af041f0c4a7",
+    "nativeBytesPreserved": true,
+    "userMembersIncluded": false
   }
 }

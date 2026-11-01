@@ -1,5 +1,7 @@
 # 消息目录
 
+2.0.2 发布后的兼容维护：旧目标缺少交付 `MESSAGE_CATALOG_CI` 时，消息目录仍可读取并返回 `messageCatalogWriteAvailable=false`，基准及翻译写入明确拒绝。有 CI 时继续执行下文的原生保存和授权检查；不会复制或伪造系统 CI。Oracle / 8.55 的实测范围见 [PeopleTools 兼容记录](peopletools-compatibility.md)。
+
 读写分离部署：查询使用 `C_META_DATA_READ` 的对应 `AI_READ_*` URI，写入使用 `C_META_DATA_WRITE` 的原 `AI_OPER_*` URI；处理类分别位于 `C_META_DATA_PKG:MetaData:Read`、`:Write`。CLI 在 split 环境自动选择，完整映射及许可权配置见 [安装与读写分离](01-auth-api.md#读写分离2026-10-30)。下文参数/版本契约继续适用；旧混合 URI 的读取示例须改用对应 Read URI。
 
 ## 原始版本保护（2026-10-29）

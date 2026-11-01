@@ -4,7 +4,7 @@
 
 ## 工程与应用包
 
-维护边界按开发与运行管理划分。ps-cli 维护 AD 开发定义，包括 Field 的 XLAT、页面/组件、程序及 AE 结构；角色、许可权、用户授权、Process Definition、进程组、Scheduler 日常配置归后续独立 ps-admin。工具自身预置的两套安装许可权及配套角色属于 ps-cli 交付，不增加通用安全管理 API。许可权可随 AD Project 迁移，角色使用原生配套交付，用户成员不随包迁移。既有 IB/门户配置入口本轮不删除，API 授权校验与运行验收的前置配置检查保留；AE 程序开发与进程调度管理分开。
+维护边界按开发与运行管理划分。ps-cli 维护 AD 开发定义，包括 Field 的 XLAT、页面/组件、程序及 AE 结构；角色、许可权、用户授权、Process Definition、进程组、Scheduler 日常配置归后续独立 ps-admin。工具自身预置的两套安装许可权及配套角色属于 ps-cli 交付，不增加通用安全管理 API。当前维护工程同时包含类型 53 许可权和类型 19 角色；旧客户端（8.55 已实测）从文件复制时跳过角色，用同批原生 DAT 补导。用户成员不随包迁移。既有 IB/门户配置入口本轮不删除，API 授权校验与运行验收的前置配置检查保留；AE 程序开发与进程调度管理分开。
 
 `C_META_DATA_PKG` 有两个含义：AD Project 是完整部署清单；同名应用根包只承载元数据处理和公共实现。不能只导入同名应用包来代替完整工程。
 
@@ -17,7 +17,7 @@
 | `C_PORTAL_PKG` | 独立门户业务包，不在核心工程内；保留 GetMenu 及其旧 JsonUtil，不改其原生 JsonObject 签名 |
 | `C_DEMO` | 演示和测试包，不属于核心部署工程；MetaDataTest 子包保存迁出的 Demo、REST/SOAP Handler 及空测试类壳 |
 
-工程还包含服务/操作、URI、Handler/Routing、SQL 定义及实际使用的自定义 Record/Field，包括 `C_AI_SQLAUD` 审计记录。只引用未修改的标准 Field 不单独列入 Project；当前仅保留自定义 `C_AE_ACTN_TYPE` 的 Field 成员，审计记录使用的 8 个系统 Field 由目标系统已有定义提供。消息翻译复用系统组件 `MESSAGE_CATALOG1` 及标准 `MESSAGE_CATALOG_CI`；不复制系统定义，也不包含原自建 `C_META_MSG_LANG` 页面/组件/CI/程序。包清单中的 Copy / Delete 条目都具有迁移意义，不将 Delete 键视为垃圾删除。
+工程还包含服务/操作、URI、Handler/Routing、SQL 定义及实际使用的自定义 Record/Field，包括 `C_AI_SQLAUD` 审计记录。只引用未修改的标准 Field 不单独列入 Project；当前仅保留自定义 `C_AE_ACTN_TYPE` 的 Field 成员，审计记录使用的 8 个系统 Field 由目标系统已有定义提供。消息写入复用系统组件 `MESSAGE_CATALOG1` 及标准 `MESSAGE_CATALOG_CI`；旧目标缺少 CI 时只保留读取，见 [PeopleTools 兼容记录](peopletools-compatibility.md)。不复制系统定义，也不包含原自建 `C_META_MSG_LANG` 页面/组件/CI/程序。包清单中的 Copy / Delete 条目都具有迁移意义，不将 Delete 键视为垃圾删除。
 
 ## 请求入口
 
@@ -58,7 +58,7 @@ JSON 和独立的电子表格工程共同使用 `C_COMMONS_PKG:JavaReflect` 反�
 ## 维护与交付
 
 1. 在开发项目维护 PeopleCode 源码，通过 API 或 AD 编译保存；正在执行的 OperAppPackage 禁止通过自身接口改写/删除，只能用 AD。
-2. 修改服务端后，使用 AD 原生 Copy To File 导出完整 Project，保留 XML/INI、依赖和新编译内容；不能只替换 XML 正文或沿用旧编译块。
+2. 修改服务端后，使用 AD 原生 Copy To File 导出完整 Project。XML/INI 按原始字节交付，保留全部依赖、源码、编译内容及来源地址；不做任何内容替换或脱敏。复制、同步及打包后核对原始文件哈希。
 3. 开发项目的 `tools/check_bundle.py` 检查清单、编译内容、Handler 和自定义依赖闭包。当前核心包含 `100` 个运行类及其编译程序，检查器同时拒绝未分类类、测试/演示/电子表格及退役翻译定义；基本 healthcheck 的 `20` 个读取操作与工程内全部 `38` 个操作也是不同口径。
 4. `tools/sync_skill.py` 将共享维护源单向同步至 release 镜像和已安装副本。只在形成新的验收包时升版本并打包，不用同名 zip 覆盖历史验收产物。
 

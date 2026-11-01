@@ -31,7 +31,7 @@ Give your agent this repository URL and ask it to install and deploy. The agent 
 |---|---|
 | **8.60** | 主要开发版本；实际开发和验证环境为 Oracle / **PeopleTools 8.60.10** |
 | **8.57 及更新版本** | 大部分功能预期可用；未逐版验证，需在目标环境编译、配置并核验所需功能 |
-| **早于 8.57（含 8.54 / 8.55）** | 尚未实机验证；继续按目标导入、编译和功能验证，不按版本号直接拒绝 |
+| **早于 8.57（含 8.54 / 8.55）** | 2.0.2 发布后的维护源已在 8.55 实测部分读取及 Service 保存，见 [兼容记录](references/peopletools-compatibility.md)；其他功能/版本继续按目标验证，不按版本号直接拒绝 |
 
 这里的版本号指 **PeopleTools**。未验证不等于不支持；兼容性以目标环境的实际结果为准，不能保证任一未测版本的大部分功能。8.60 的验证结果不等于对所有补丁、数据库和平台组合的认证。
 
@@ -78,7 +78,7 @@ python scripts/peoplesoft_api.py search field EMPLID
 python scripts/peoplesoft_api.py record struct JOB
 ```
 
-公开工程中的环境专属 REST BaseURL 已替换为 `https://ps.example.invalid`，**部署时必须改为目标系统的实际地址**。认证及 20 项读取健康检查通过表示基本读取安装就绪；写权限和 SQL DML 需分别验证。写入使用读取时的原始 `expectedVersion`，冲突会拒绝覆盖。
+工程 XML/INI 按 AD 原始导出逐字节交付，保留来源环境 REST BaseURL；不改写导出文件。目标发布地址确需调整时，通过 PeopleSoft 原生配置或已授权接口处理。CLI 连接地址来自用户填写的目标配置。认证及 20 项读取健康检查通过表示基本读取安装就绪；写权限和 SQL DML 需分别验证。写入使用读取时的原始 `expectedVersion`，冲突会拒绝覆盖。
 
 ### 目录与文档
 
@@ -112,7 +112,7 @@ Request path: `Agent / developer → Skill / CLI or custom client → MetaData A
 |---|---|
 | **8.60** | Primary development version; developed and validated on Oracle / **PeopleTools 8.60.10** |
 | **8.57 and later** | Most features are expected to work; individual releases have not all been tested. Compile, configure, and verify the required features on your target system |
-| **Earlier than 8.57, including 8.54 / 8.55** | Not yet verified on a live target. Proceed with native import, compilation, and feature checks; the version number alone does not block installation |
+| **Earlier than 8.57, including 8.54 / 8.55** | Post-2.0.2 maintenance has limited live 8.55 verification for reads and Service saves; see [compatibility notes](references/peopletools-compatibility.md). Validate other features and versions on the target; the version number alone does not block installation |
 
 These version numbers refer to **PeopleTools**. Validation on 8.60 does not certify every patch, database, or platform combination.
 
@@ -159,7 +159,7 @@ python scripts/peoplesoft_api.py search field EMPLID
 python scripts/peoplesoft_api.py record struct JOB
 ```
 
-Environment-specific REST BaseURLs in the public project use `https://ps.example.invalid`; **replace them with your target system's actual addresses during deployment**. Authentication and the 20 read health checks establish basic read readiness. Verify write permissions and SQL DML separately. Definition writes use the original `expectedVersion` returned by a read and reject conflicting changes.
+Project XML/INI files are delivered byte-for-byte as exported by Application Designer, including source-environment REST BaseURLs. Do not rewrite the export. If target publishing addresses require adjustment, use native PeopleSoft configuration or authorized APIs. The CLI connects using the user's target configuration. Authentication and the 20 read health checks establish basic read readiness. Verify write permissions and SQL DML separately. Definition writes use the original `expectedVersion` returned by a read and reject conflicting changes.
 
 ### Files and documentation
 

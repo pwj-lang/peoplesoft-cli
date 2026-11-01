@@ -72,6 +72,10 @@ python scripts/install_helper.py apply
 
 常规安装只提醒：“请用户或管理员按需要自行分配 C_PSCLI_READ（只读）或 C_PSCLI_WRITE（读写）角色，完成后告诉 Agent 再验证。”安装助手不选择角色、不修改角色成员、不自行给当前用户名授权；实际权限由目标系统的授权决定。两个预置角色不包含用户、不含动态成员规则、不允许自助授权其他角色。不为通过健康检查扩大权限。已有其他角色的权限会累加；只读角色不会撤销已有写权限。两套预置列表还分别包含系统 `MESSAGE_CATALOG_CI` 的 Get/Cancel，以及 Get/Cancel/Create/Save/AddMessage/DeleteMessage 方法权限，配合各自的消息目录读写操作使用。
 
-许可权列表由开发环境原生创建、回读后登记到 `C_META_DATA_PKG`，原生导出与操作清单逐项核对。角色及其到许可权的两条关联以原生 Data Mover 配套交付；已有部署权限时可完成定义导入，缺少权限时提醒管理员处理，不绕过权限自举。定义导入不等于给用户名授权。公开 DAT 只替换 `REM Database` 注释中的来源库名，原生记录数据字节保持不变。AD Project 不能自动迁移角色，见 [Oracle 迁移说明](https://docs.oracle.com/cd/E92519_02/pt856pbr3/eng/pt/tlcm/task_UsingtheUpgradeWorkspace-0773e7.html)。导入前核对同名冲突；只导入两套角色与许可权关联，不导入用户成员。旧包缺少预置安全定义时如实说明并提醒管理员准备，不假称已随包提供。
+当前维护工程 `C_META_DATA_PKG` 同时包含两套许可权（类型 53）和两套角色（类型 19），角色仅关联各自的工具许可权，描述为 PsCli读取/写入许可权、PsCli读取/写入角色。8.60 原生 XML/INI 及配套 DAT 全部按原始字节交付。目标导入后分别回读角色和许可权，不能只凭 Copy 成功判断角色已迁移。
+
+8.55 原生 AD 的 Copy From File 实测会跳过 XML 中的两套角色，尽管工程清单保留它们；此时使用同包 `assets/security/pscli-roles.dat` 与 `roles-import.dms` 完成原生补导。DAT 仅含两条 PSROLEDEFN 和两条 PSROLECLASS，不含用户成员；导入前备份并检查同名定义，已有同名定义更新须在授权范围内，模板使用 UPDATE_DUPS 更新导出的记录，不删除其他关联或用户。导入后核对描述、许可权关联及原有用户成员未变。两端基础语言不同时，Data Mover 自动把描述映射至基准表或相关语言表；应按用户显示语言核对有效描述，不能只查询 PSROLEDEFN.DESCR 判断导入失败，也不改写 DAT 的 BASE_LANGUAGE。角色已由原生 Copy 正确迁移时不重复补导。较旧稳定包仅配套 DAT，按其实际交付处理。语言映射机制见 [Oracle Data Mover IMPORT](https://docs.oracle.com/cd/E92519_02/pt856pbr3/eng/pt/tlcm/langref_UsingPeopleSoftDataMoverCommands-077ad8.html)。
+
+已有部署权限时由 Agent 完成定义导入；缺少权限时提醒管理员处理，不绕过权限自举。定义导入不等于给用户名授权。Oracle 的 [旧版迁移说明](https://docs.oracle.com/cd/E92519_02/pt856pbr3/eng/pt/tlcm/task_UsingtheUpgradeWorkspace-0773e7.html) 也区分可复制到数据库与可复制到文件的定义类型；不把旧版客户端限制泛化为所有版本的 Project 均不能包含角色。
 
 来源创建、导出检查与目标迁移验收分开记录。在目标导入后独立核对许可权操作、角色关联、无用户成员和 SQL 写执行关闭；最后让用户/管理员分配角色并用该用户名验证。不要依赖尚未授权的 API 完成自身初始授权。

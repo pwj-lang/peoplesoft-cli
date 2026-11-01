@@ -155,6 +155,7 @@ insertItem 的服务端和 CLI 默认均为 `takeAction=1、upgradeAction=0、co
 | 32 | Component Interface | value1=CI 名称 |
 | 42 | Component Interface PeopleCode | value1=CI 名称，value2=Methods，ObjectID=74 / 12；完整程序独立于 32 类型父 CI |
 | 53 | Permission List | value1=许可权名称；授权命令不自动登记整份列表 |
+| 19 | Role | value1=角色名；可登记工程，旧 AD 的文件复制可能跳过，目标需独立核对 |
 | 55 | Portal Registry Structure | value1=门户名称，value2=F/C，value3=对象名称 |
 | 7 | Component | value1=PNLGRPNAME，value2=MARKET |
 | 30 | SQL | value1=SQLID，value2=SQL 子类型：0=普通 SQL，1=AE 步骤 SQL，2=Record View SQL |

@@ -6,9 +6,9 @@
 
 ## AD 原生工程
 
-`C_META_DATA_PKG/` 的 XML/INI 由 Oracle PeopleSoft Application Designer 导出，保留原生 PeopleCode 源码、编译内容和工程清单；公开包仅对环境专属 REST BaseURL 主机做占位替换，可能含 PeopleTools 生成元数据、交付对象标记和必要引用。
+`C_META_DATA_PKG/` 的 XML/INI 由 Oracle PeopleSoft Application Designer 导出，按原始字节交付，保留来源环境地址、PeopleCode 源码、编译内容和工程清单，不进行内容改写；可能含 PeopleTools 生成元数据、交付对象标记和必要引用。
 
-`assets/security/pscli-roles.dat` 是工具专用角色的原生 Data Mover 导出，只包含两套角色定义及其许可权关联，不含用户成员；公开文件仅替换来源数据库注释，原生记录数据保持不变。
+`assets/security/pscli-roles.dat` 是工具专用角色的原生 Data Mover 导出，按原始字节交付，只包含两套角色定义及其许可权关联，不含用户成员。当前工程 XML 也包含角色；DAT 用于旧客户端跳过角色时的原生补导。
 
 MIT 许可证不主张 Oracle 或第三方内容的所有权，也不授予其软件使用权。持有本项目不代表获得 PeopleSoft/PeopleTools 许可证；使用和再分发须遵守适用许可及组织要求。
 

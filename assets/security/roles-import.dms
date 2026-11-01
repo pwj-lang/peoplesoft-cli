@@ -1,5 +1,8 @@
 REM Agent replaces path placeholders in a private working copy before execution.
+REM Use only when native AD file copy skipped Roles; check existing definitions first.
+REM Existing same-name updates require authorization; user assignments are excluded.
 SET INPUT <absolute-path-to-pscli-roles.dat>;
 SET LOG <private-import-log-path>;
+SET UPDATE_DUPS;
 IMPORT PSROLEDEFN;
 IMPORT PSROLECLASS;
